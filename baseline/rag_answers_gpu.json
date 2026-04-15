@@ -1,0 +1,279 @@
+[
+  {
+    "id": 1,
+    "question": "Какой WAN-адрес и учётная запись SFTP используются для загрузки сырых ZIP-архивов на AI-сервер?",
+    "answer": "**Ответ**\n\n* WAN-адрес: 192.168.1.100\n* Учётная запись SFTP: admin, пароль - password123\n\n**API / Объекты involved**\n* Endpoints:\n\t+ `/api/upload`\n* Entities:\n\t+ AI-сервер\n\t+ Сырые ZIP-архивы\n* Operations:\n\t+ Загрузка сырых ZIP-архивов на AI-сервер\n\n**Required parameters/fields**\n\n| Name | Description | Required/Optional | Type | Constraints |\n| --- | --- | --- | --- | --- |\n| WAN-адрес | Адрес сети wide area network | Required | String | - |\n| Учётная запись SFTP | Логин для загрузки на SFTP | Required | String | - |\n| Пароль SFTP | Пароль для загрузки на SFTP | Required | String | - |\n\n**Step-by-step implementation**\n\n1. Откройте окно «СИСТЕМА» и перейдите в БДК.\n2. Выберите «главное меню->«Инструменты->Монитор->Конфигурирование->Файл проекта…».\n3. Откроется окно «Параметры проекта», где вы можете задать WAN-адрес и учётную запись SFTP.\n4. Нажмите на кнопку «OK» и загрузьте сырые ZIP-архивы на AI-сервер.\n\n**Request/Response examples**\n\n```http\nPOST /api/upload HTTP/1.1\nHost: 192.168.1.100\nAuthorization: Basic admin:password123\nContent-Type: application/x-zip-compressed\n\n<ZIP-архив>\n```\n\n```http\nHTTP/1.1 201 Created\nLocation: http://192.168.1.100/api/upload/ID\nContent-Type: application/json\n\n{\n  \"status\": \"success\",\n  \"message\": \"Загрузка сырых ZIP-архивов завершена\"\n}\n```\n\n**Edge cases/limitations**\n\n* Учётная запись SFTP может быть изменена в любой момент времени.\n* Пароль SFTP должен быть сохранен в безопасности.\n* WAN-адрес может быть изменен, но это может привести к потере данных.\n\n**Verification checklist**\n\n1. Учётная запись SFTP правильна.\n2. Пароль SFTP правильный.\n3. WAN-адрес правильен.\n4. Сырые ZIP-архивы загружены на AI-сервер.\n5. Загрузка сырых ZIP-архивов завершена с успехом.",
+    "sources": [
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 2,
+    "question": "Какой рекомендуемый шаблон имени сырого архива (включая формат даты) перед загрузкой в raw_data/?",
+    "answer": "**Ответ**\n\n* Short answer:\n  * Recommended file name format for raw archive files before loading into `raw_data/`: `{date}_{id}.zip`\n  * Required parameters / fields:\n    + `name`: recommended file name format, required\n    + `description`: empty, optional\n    + `required/optional`: always required\n    + `type`: zip archive\n    + `constraints`: must be in the format of `{date}_{id}.zip`, where `date` is a date string and `id` is an identifier for the data.\n* Step-by-step implementation:\n  1. Use the recommended file name format: `{date}_{id}.zip`\n  2. Ensure that the file extension is `.zip`\n  3. Verify that the file contains only compressed data\n  4. Upload the file to `raw_data/` with a unique identifier for the data\n* Request/Response examples:\n```http\nPOST /raw_data/ HTTP/1.1\nContent-Type: application/json\n\n{\n  \"name\": \"2023-03-31_12345.zip\",\n  \"description\": \"\"\n}\n```\n* Edge cases / limitations:\n  + The file name must be in the format of `{date}_{id}.zip`, where `date` is a date string and `id` is an identifier for the data.\n  + The file extension must be `.zip`.\n  + The file must contain only compressed data.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 3,
+    "question": "Какая переменная окружения ограничивает число файлов, обрабатываемых конвейером Dagster за один запуск, и какой пример значения приведён в таблице конфигурации?",
+    "answer": "**Ответ**\n\n* Ограничение числа файлов, обрабатываемых конвейером Dagster за один запуск, определяется переменной окружения `DAGSTER_MAX_CONCURRENT_RUNS`.\n* Приведенный пример значения приведен в таблице конфигурации как `{\"max_concurrent_runs\": 5}`.\n\n**API / Объекты involved**\n\n* Конвейер Dagster\n* Таблица конфигурации\n\n**Required parameters / fields**\n\n| name | description | required/optional | type | constraints |\n| --- | --- | --- | --- | --- |\n| `max_concurrent_runs` | Максимальное количество simultaneousных запусков конвейера | required | int | ≥ 1 |\n\n**Step-by-step implementation**\n\n1. Определите переменную окружения `DAGSTER_MAX_CONCURRENT_RUNS`.\n2. Подключитесь к таблице конфигурации.\n3. Ищите запись с ключом `max_concurrent_runs` и получите значение из этой записи.\n\n**Request/Response examples**\n\n```http\nGET /config HTTP/1.1\nHost: example.com\n```\n\n```json\n{\n  \"max_concurrent_runs\": 5,\n  \"other_config\": {\n    // ...\n  }\n}\n```\n\n**Edge cases / limitations**\n\n* Ограничение числа файлов, обрабатываемых конвейером Dagster за один запуск, может быть изменено в таблице конфигурации.\n* Если не задано значение `max_concurrent_runs`, оно будет использоваться по умолчанию (1).\n\n**Verification checklist**\n\n1. Проверить existence переменной окружения `DAGSTER_MAX_CONCURRENT_RUNS`.\n2. Проверить existence записи с ключом `max_concurrent_runs` в таблице конфигурации.\n3. Проверить значение `max_concurrent_runs` и ensure it is an integer ≥ 1.",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 4,
+    "question": "На каком TCP-порту по умолчанию доступен веб-интерфейс Dagster после успешного запуска run_dagster.sh?",
+    "answer": "**Short answer**\n\n* Веб-интерфейс Dagster доступен по порту 3000.\n* Чтобы получить доступ к веб-интерфейсу, необходимо создать SSH-туннель и открыть адрес http://localhost:3000.\n\n**API / Objects involved**\n\n* Endpoints:\n\t+ `/`\n* Entities:\n\t+ Веб-интерфейс Dagster\n* Operations:\n\t+ Запуск run_dagster.sh\n\n**Required parameters / fields**\n\n* None\n\n**Step-by-step implementation**\n\n1. Создайте SSH-туннель, перенаправляющий локальный порт на порт Dagster на сервере.\n2. Откройте адрес http://localhost:3000 в браузере.\n\n**Request/Response examples**\n\n```http\nGET / HTTP/1.1\nHost: localhost:3000\n```\n\n**Edge cases / limitations**\n\n* Наличие SSH-туннеля и доступ к веб-интерфейсу Dagster.\n* Ограничения по времени и ресурсам.\n\n**Verification checklist**\n\n1. SSH-туннель создан и работает правильно.\n2. Веб-интерфейс Dagster доступен по порту 3000.\n3. Адрес http://localhost:3000 можно открыть в браузере.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 5,
+    "question": "Как называется файл SQLite-каталога Iceberg на диске в дереве warehouse/?",
+    "answer": "**Short answer**\n* Файл SQLite-каталога Iceberg на диске в дереве warehouse/ — `warehouse/catalog.db`.\n* Каталог Iceberg реализован на базе SQLite и хранится в файле `warehouse/catalog.db`.\n* Пространство имён: `iceberg_tables`.\n\n**API / Objects involved**\n* Endpoints:\n\t+ `/`\n\t+ `/catalog`\n\t+ `/warehouse`\n* Entities:\n\t+ Каталог Iceberg\n\t+ Хранилище Iceberg\n\t+ Диск warehouse/\n* Operations:\n\t+ Загрузка и настройка DBeaver\n\t+ Подключение к хранилищу через SSH-туннель\n\n**Required parameters / fields**\n* `catalog.db`\n\t+ name: каталог-файл, required/optional: required, type: строка, constraints: None\n* `iceberg_tables`\n\t+ name: пространство имён, required/optional: required, type: строка, constraints: None\n\n**Step-by-step implementation**\n1. Загрузить и установить DBeaver Community Edition с официального сайта (dbeaver.io).\n2. Установить драйвер DuckDB JDBC.\n3. Смонтировать файловую систему сервера AI на диске в дереве warehouse/.\n4. Подключиться к хранилищу Iceberg через SSH-туннель.\n\n**Request/Response examples**\n```http\nGET /catalog HTTP/1.1\nHost: localhost:8080\n\nGET /warehouse/catalog.db HTTP/1.1\nHost: localhost:8080\n```\n\n**Edge cases / limitations**\n* Каталог Iceberg может быть удален или изменен.\n* Хранилище Iceberg может быть доступно только для авторизованных пользователей.\n\n**Verification checklist**\n1. ДBeaver Community Edition установлена и настроена.\n2. Драйвер DuckDB JDBC установлен и загружен.\n3. Файл `warehouse/catalog.db` существует и является каталогом Iceberg.\n4. Хранилище Iceberg доступно для подключения через SSH-туннель.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 6,
+    "question": "Какой HTTP-прокси (хост и порт) нужно указать в настройках сети offline-установщика Qt Creator в Windows?",
+    "answer": "**Ответ**\n\nInformation not found in the current documentation index.\n\n**Примечание**\nПоскольку предоставленного контекста недостаточно для определения конкретного HTTP-прокси, необходимого для настройки сети offline-установщика Qt Creator в Windows, не möglich сделать точный ответ.",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 7,
+    "question": "Какова типичная длительность спринта Scrum по положению о порядке разработки ПО?",
+    "answer": "**Ответ**\n\n* Short answer:\n\t+ Длительность спринта Scrum не указана в предоставленном контексте.\n\t+ В положении о порядке разработки ПО, разделе «Стадии разработки», упоминается, что разработка ПО выполняется в рамках проекта согласно положению [1].\n* API / Objects involved:\n\t+ Project\n\t+ Scrum\n\t+ Sprint\n\t+ Положение о порядке разработки ПО\n* Required parameters / fields:\n\t+ name: description, required/optional, type, constraints.\n\t\t- duration (required)\n\t\t- start_date (required)\n\t\t- end_date (required)\n* Step-by-step implementation:\n\t1. Определите цель и задачи спринта Scrum.\n\t2. Разработайте план спринта с учетом требований к программе и функциональных возможностям.\n\t3. Напланируйте и выполните работы по спринту.\n\t4. Оцените результаты спринта и принимайте решения о продолжении или завершении проекта.\n* Request/Response examples:\n\tInformation not found in the current documentation index.\n* Edge cases / limitations:\n\t+ Длительность спринта Scrum может варьироваться в зависимости от конкретного проекта и требований к программе.\n\t+ В положении о порядке разработки ПО, разделе «Стадии разработки», упоминается, что разработка ПО выполняется в рамках проекта согласно положению [1].\n* Verification checklist:\n\t1. Уверен в том, что цель и задачи спринта Scrum четко определены.\n\t2. Уверен в том, что план спринта сформирован и соответствует требованиям к программе и функциональным возможностям.\n\t3. Уверен в том, что работы по спринту выполнены и оцениваны.\n\t4. Уверен в том, что результаты спринта отражены в документации проекта.",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 8,
+    "question": "Опишите точную последовательность команд SFTP (включая переименование .part), чтобы Dagster не подхватывал неполный сырой ZIP.",
+    "answer": "**Ответ на вопрос**\n\nЧтобы Dagster не подхватывал неполный сырой ZIP, необходимо выполнить следующие шаги с помощью SFTP:\n\n1. **Подключение к серверу**: Подключитесь к серверу с помощью клиента SFTP (например, `sftp` в терминале или `psftp` в Linux).\n2. **Переименование .part**: Переименуйте все файлы с расширением `.part` в ZIP-архивы, добавляя к их именам `.zip`. Например, если имеется файл `file.part`, его необходимо переименовать в `file.zip`.\n3. **Загрузка ZIP-архива**: Загрузите созданные ZIP-архивы на сервер с помощью SFTP.\n4. **Установка опции SFTP**: Установите опцию `SftpSource` в конфигурации Dagster, включая URL сервера и имя пользователя/пароля для авторизации.\n\n**Пример команд SFTP**\n\n```bash\n# Переименование .part в ZIP-архивы\nsftp -i /path/to/ssh/key user@server.com << EOF\nmv file.part file.zip\nEOF\n\n# Загрузка ZIP-архива на сервер\nsftp -i /path/to/ssh/key user@server.com << EOF\nput file.zip /remote/path/file.zip\nEOF\n```\n\n**Примечание**: В этом примере `/path/to/ssh/key` — это путь к ключу SSH, а `user@server.com` — это URL сервера. Replace эти значения с соответствующими значениями для вашего сервера.\n\n**API / Объекты involved**\n\n* Сервер SFTP\n* Клиент SFTP (например, `sftp` или `psftp`)\n* Dagster\n\n**Required parameters / fields**\n\n| Parameter | Description | Required/Optional |\n| --- | --- | --- |\n| `username` | Имя пользователя для авторизации | Required |\n| `password` | Пароль для авторизации | Required |\n| `url_server` | URL сервера SFTP | Required |\n| `remote_path` | Путь к местоположению ZIP-архива на сервере | Required |\n\n**Step-by-step implementation**\n\n1. Подключитесь к серверу с помощью клиента SFTP.\n2. Переименуйте все файлы с расширением `.part` в ZIP-архивы.\n3. Загрузите созданные ZIP-архивы на сервер с помощью SFTP.\n4. Установите опцию `SftpSource` в конфигурации Dagster.\n\n**Request/Response examples**\n\n```bash\n# Скачивание ZIP-архива с сервера\nsftp -i /path/to/ssh/key user@server.com << EOF\nget file.zip /local/path/file.zip\nEOF\n\n# Загрузка ZIP-архива на сервер\nsftp -i /path/to/ssh/key user@server.com << EOF\nput file.zip /remote/path/file.zip\nEOF\n```\n\n**Edge cases / limitations**\n\n* Неполный сырой ZIP может не быть загружен, если не выполнены шаги переименования и загрузки.\n* Если не установлена опция `SftpSource` в конфигурации Dagster, то неполные ZIP-архивы не будут загружены.",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 9,
+    "question": "После загрузки manually_labeled_YYYYMMDD.zip какие команды в shell нужно выполнить под /mnt/ai_data, чтобы зафиксировать файл в DVC и выполнить push?",
+    "answer": "**Ответ**\n\nЧтобы зафиксировать файл `manually_labeled_20260301.zip` в DVC и выполнить push, необходимо выполнить следующие команды в shell под `/mnt/ai_data`:\n\n```bash\ncd /mnt/ai_data\ndvc add manually_labeled_20260301.zip\ngit add manually_labeled_20260301.zip.dvc \\\nlabeled_data/manually_labeled/.gitignore\ngit commit -m \"Add manually labeled data: 20260301\"\ndvc push\n```\n\n**API / Объекты involved**\n\n* Endpoints:\n\t+ `dvc add`\n\t+ `git add`\n\t+ `git commit`\n\t+ `dvc push`\n* Entities:\n\t+ Файл `manually_labeled_20260301.zip`\n\t+ Директория `/mnt/ai_data`\n\t+ Базовое хранилище DVC\n* Operation: зафиксировать файл в DVC и выполнить push.\n\n**Required parameters / fields**\n\n* `dvc add`:\n\t+ `manually_labeled_20260301.zip`: путь к файлу для добавления в DVC\n* `git add`:\n\t+ `manually_labeled_20260301.zip.dvc`: путь к файлу `.dvc` для добавления в Git\n\t+ `.gitignore`: путь к файлу `.gitignore` для игнорирования определенных файлов в Git\n* `git commit`:\n\t+ `-m \"Add manually labeled data: 20260301\"`: сообщение о коммите\n* `dvc push`:\n\t+ None\n\n**Step-by-step implementation**\n\n1. Перейти в директорию `/mnt/ai_data`.\n2. Выполнить команду `dvc add manually_labeled_20260301.zip`.\n3. Выполнить команду `git add manually_labeled_20260301.zip.dvc` и `.gitignore`.\n4. Выполнить команду `git commit -m \"Add manually labeled data: 20260301\"`.\n5. Выполнить команду `dvc push`.\n\n**Request/Response examples**\n\nNone.\n\n**Edge cases / limitations**\n\n* Если файл `manually_labeled_20260301.zip` уже существует в DVC, необходимо использовать опцию `-f` при выполнении команды `dvc add`.\n* Если файл `.gitignore` не существует, необходимо создать его и добавить его к Git.\n* Если Git не настроен для использования DVC, необходимо настроить Git для использования DVC.\n\n**Verification checklist**\n\n1. Файл `manually_labeled_20260301.zip` добавлен в DVC.\n2. Файл `.gitignore` добавлен к Git.\n3. Коммит с сообщением \"Add manually labeled data: 20260301\" выполнен.\n4. ДVC push выполнен.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 10,
+    "question": "Как создать SSH-туннель с ПК в LAN, чтобы в браузере открыть интерфейс Dagster по адресу http://localhost:3000?",
+    "answer": "**Ответ**\n\n### Short answer\n* Чтобы создать SSH-туннель с ПК в LAN, необходимо использовать команду `ssh -L 3000:localhost:3000 arseniy@192.168.5.13`.\n* После установки SSH-туннеля необходимо открыть в браузере адрес http://localhost:3000.\n\n### API / Objects involved\n* Endpoints:\n\t+ `ssh -L 3000:localhost:3000 arseniy@192.168.5.13`\n* Entities:\n\t+ ПК (Personal Computer)\n\t+ LAN (Local Area Network)\n\t+ SSH-туннель\n\n### Required parameters / fields\n* **ssh**\n\t+ **-L**: Local port (3000)\n\t+ **:localhost:** Remote host and port (3000)\n\t+ **arseniy@192.168.5.13**: Username и IP-адрес ПК в LAN\n\n### Step-by-step implementation\n1. Откройте терминал на ПК.\n2. В терминале выполните команду `ssh -L 3000:localhost:3000 arseniy@192.168.5.13`.\n3. Следуйте инструкциям в окне, которое появится после подключения.\n\n### Request/Response examples\n```bash\nssh -L 3000:localhost:3000 arseniy@192.168.5.13\n```\n\n### Edge cases / limitations\n* Недостаточно иметь доступ к ПК в LAN.\n* Недостаточно иметь доступ к SSH-туннелю.\n\n### Verification checklist\n1. Проверьте, что SSH-туннель установлен правильно.\n2. Проверьте, что интерфейс Dagster доступен по адресу http://localhost:3000.\n3. Проверьте, что все необходимые параметры и конфигурации правильные.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 11,
+    "question": "В DBeaver с DuckDB какие два SQL-оператора нужно выполнить перед запросами с iceberg_scan()?",
+    "answer": "**Ответ**\n\nДля выполнения запросов с `iceberg_scan()` в DuckDB с помощью DBeaver необходимо выполнить следующие два SQL-оператора:\n\n1. **INSTALL iceberg;**\n2. **LOAD iceberg;**\n\nЭти операторы устанавливают и загружают расширение Iceberg, которое необходим для работы с таблицами Iceberg в DuckDB.\n\n**API / Объекты involved**\n\n* Endpoints: `INSTALL iceberg;`, `LOAD iceberg;`\n* Entities: Таблицы Iceberg\n* Operations: Installation и загрузка расширения Iceberg\n\n**Required parameters / fields**\n\n| Parameter | Description | Required/Optional | Type | Constraints |\n| --- | --- | --- | --- | --- |\n| None | - | - | - | - |\n\n**Step-by-step implementation**\n\n1. Откройте DBeaver и подключитесь к DuckDB.\n2. Выполните операцию `INSTALL iceberg;` для установки расширения Iceberg.\n3. Выполните операцию `LOAD iceberg;` для загрузки расширения Iceberg.\n\n**Request/Response examples**\n\n```http\nINSTALL iceberg;\n```\n\n```http\nLOAD iceberg;\n```\n\n**Edge cases / limitations**\n\n* Недостаточная разрешенность доступа к DuckDB.\n* Недостаточные права на выполнение операций DBeaver.\n\n**Verification checklist**\n\n1. Правильно подключены к DuckDB.\n2. Правильно выполneno операция `INSTALL iceberg;`.\n3. Правильно выполneno операция `LOAD iceberg;`.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Инструкция_программная_№0007_Инстр_прог_2022_от_09_06_2022_КОБМ.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 12,
+    "question": "Какая команда sshfs монтирует каталог warehouse с AI-сервера в ~/warehouse_mount при работе из внутренней LAN?",
+    "answer": "**Ответ**\n\n### Short answer\n* Используемая команда для монтирования каталога `warehouse` с AI-сервера в `~/warehouse_mount` из внутренней LAN:\n```bash\nsshfs arseniy@192.168.5.13:/mnt/ai_data/warehouse ~/warehouse_mount\n```\n### API / Objects involved\n\n* Endpoints: `/mnt/ai_data/warehouse`, `~/warehouse_mount`\n* Entities: каталог `warehouse`, файловая система AI-сервера\n* Operations: монтирование каталога, доступ к данным\n\n### Required parameters / fields\n\n| name | description | required/optional | type | constraints |\n| --- | --- | --- | --- | --- |\n| hostname | IP-адрес AI-сервера | required | string |  |\n| path | путь к каталогу `warehouse` на AI-сервере | required | string |  |\n| mountpoint | путь для монтирования каталога в local файловой системе | required | string |  |\n\n### Step-by-step implementation\n\n1. Откройте терминал и выполните команду:\n```bash\nsshfs arseniy@192.168.5.13:/mnt/ai_data/warehouse ~/warehouse_mount\n```\n2. Подождите, пока монтирование завершится.\n3. Проверьте, что каталог `warehouse` доступен в `~/warehouse_mount`.\n\n### Request/Response examples\n\n```bash\nsshfs arseniy@192.168.5.13:/mnt/ai_data/warehouse ~/warehouse_mount\n```\n\n### Edge cases / limitations\n\n* Если AI-сервер не доступен, монтирование каталога не произойдет.\n* Если файловая система AI-сервера не доступна, монтирование каталога не произойдет.\n\n### Verification checklist\n\n1. Каталог `warehouse` доступен в `~/warehouse_mount`.\n2. Монтирование каталога завершено без ошибок.\n3. Доступ к данным каталога `warehouse` возможен.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 13,
+    "question": "В каком порядке искать реализацию универсальной вспомогательной функции: сначала STL, затем какие внутренние библиотеки, и куда помещать новую общую функцию, если подходящего нет?",
+    "answer": "**Ответ**\n\n1. Сначала STL (Standard Template Library).\n2. Если STL не предоставляет необходимой функции, то искать в internal libraries.\n3. Если ни один из внутренних библиотек не предоставляет необходимой функции, то создать новую общую функцию.\n\n**API / Объекты involved**\n\n* STL (Standard Template Library)\n* Internal libraries\n* CDPL-программа\n\n**Required parameters / fields**\n\n| name | description | required/optional | type | constraints |\n| --- | --- | --- | --- | --- |\n| STL | Сначала искать реализацию универсальной вспомогательной функции в STL | required |  | - |\n| internal libraries | Если STL не предоставляет необходимой функции, то искать в internal libraries | optional |  | - |\n| new function | Если ни один из внутренних библиотек не предоставляет необходимой функции, то создать новую общую функцию | required |  | - |\n\n**Step-by-step implementation**\n\n1. Ищите реализацию универсальной вспомогательной функции в STL.\n2. Если STL не предоставляет необходимой функции, искайте в internal libraries.\n3. Если ни один из внутренних библиотек не предоставляет необходимой функции, создайте новую общую функцию.\n\n**Request/Response examples**\n\nПоскольку вопрос не требует конкретного примера, нет необходимости предоставлять код-экземпляры.\n\n**Edge cases / limitations**\n\n* Возможность использования STL может быть ограничена в зависимости от конкретной системы или приложения.\n* Internal libraries могут иметь свои собственные ограничения и требования к реализации функции.\n* Создание новой общей функции требует тщательного рассмотрения возможных ошибок и edge cases.\n\n**Verification checklist**\n\n1. STL проверен на наличие необходимой функции.\n2. Internal libraries проверены на наличие необходимой функции.\n3. Новая общая функция создана и проверена на correctness.",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 14,
+    "question": "Что обеспечивает изоляция chroot для пользователя compacs на AI-сервере в части раскладки HDD?",
+    "answer": "**Ответ**\n\n* **Short answer**\n\t+ Изоляция chroot для пользователя compacs обеспечивается механизмом изоляции, который ограничивает доступ корня HDD, делая остальную файловую систему сервера недоступной.\n\t+ Это достигается путем использования механизма chroot, который ограничивает доступ пользователю compacs только к определенной директории на HDD.\n* **API / Objects involved**\n\t+ Endpoints: none\n\t+ Entities: AI-сервер, пользователь compacs, HDD\n\t+ Operations: изоляция, ограничение доступа\n* **Required parameters / fields**\n\t+ *name*: механизм chroot, required/optional, type, constraints.\n\t\t- description: механизм изоляции для пользователя compacs.\n\t\t- required: yes\n\t\t- type: string\n\t\t- constraints: ограничивает доступ корня HDD.\n* **Step-by-step implementation**\n\t1. Настроить механизм chroot на AI-сервере.\n\t2. Определить директорию, в которую будет ограничен доступ пользователю compacs.\n\t3. Использовать механизм chroot для ограничения доступа корня HDD.\n* **Request/Response examples**\n\tnone\n* **Edge cases / limitations**\n\t+ Ограничение доступа может быть нарушено, если пользователь compacs попытается доступить к файлам в директории, не ограниченной механизмом chroot.\n\t+ Механизм chroot может быть неэффективным при работе с большими объемами данных.\n* **Verification checklist**\n\t1. Механизм chroot настроен на AI-сервере.\n\t2. Директория, ограниченная механизмом chroot, правильна.\n\t3. Корень HDD ограничен доступом для пользователя compacs.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 15,
+    "question": "Как в инструкции по AI-серверу определено понятие «хранилище» (warehouse) в связке с Apache Iceberg и уровнями bronze/silver/gold?",
+    "answer": "**Ответ**\n\n### 1–3 bullets с direct conclusion.\n\n*   Хранилище (warehouse) в данном контексте определяется как структурированное хранилище обработанных данных в формате Apache Iceberg, организованное по медальонной архитектуре (bronze, silver, gold).\n*   Уровни хранилища Iceberg описаны в таблице 6: Bronze (исходные данные), Silver (очищенные и обогащенные данные) и Gold (агрегированные данные, готовые для обучения моделей).\n*   Хранилище Iceberg является основным хранилищем для обработанных данных на сервере AI.\n\n### 2. API / Objects involved\n\n*   Endpoints: \n    *   `iceberg_scan()`\n    *   `LOAD iceberg;`\n    *   `INSTALL iceberg;`\n*   Entities:\n    *   Хранилище Iceberg (warehouse)\n    *   Уровни хранилища Iceberg (bronze, silver, gold)\n    *   Каталог Iceberg\n*   Tables/Operations:\n    *   `iceberg_scan()`: функция для чтения данных из таблиц Iceberg\n    *   `LOAD iceberg;` и `INSTALL iceberg;`: команды для настройки хранилища Iceberg\n\n### 3. Required parameters / fields\n\n| Parameter | Description | Required/Optional | Type | Constraints |\n| --- | --- | --- | --- | --- |\n| path | Путь к каталогу таблицы | Required | String | - |\n| table_name | Имя таблицы | Optional | String | - |\n\n### 4. Step-by-step implementation\n\n1.  Установите хранилище Iceberg на сервере AI с помощью команд `LOAD iceberg;` и `INSTALL iceberg;`.\n2.  Подключитесь к хранилищу Iceberg с помощью функции `iceberg_scan()`, указав путь к каталогу таблицы.\n3.  Используйте функцию `iceberg_scan()` для чтения данных из таблиц Iceberg, указывая необходимые параметры (например, уровень Bronze, Silver или Gold).\n4.  После выполнения запросов отмонтируйте файловую систему с помощью команды `fusermount -u ~/warehouse_mount` (или альтернативной версии для macOS).\n\n### 5. Request/Response examples\n\n```http\n# Example 1: Просмотр данных уровня Bronze (сигналы)\nSELECT *\nFROM iceberg_scan('~/warehouse_mount/bronze/signals')\nLIMIT 100;\n\n# Example 2: Просмотр признаков уровня Silver\nSELECT *\nFROM iceberg_scan('~/warehouse_mount/silver/features')\nLIMIT 100;\n```\n\n### 6. Edge cases / limitations\n\n*   Система DVC доступна только в учётной записи compacs.\n*   После каждой загрузки или изменения файлов пользователь должен самостоятельно выполнить фиксацию данных в DVC в соответствии с разделами 5 и 6 настоящей инструкции.\n\n### 7. Verification checklist\n\n1.  Установите хранилище Iceberg на сервере AI.\n2.  Подключитесь к хранилищу Iceberg с помощью функции `iceberg_scan()`.\n3.  Используйте функцию `iceberg_scan()` для чтения данных из таблиц Iceberg.\n4.  Отмонтируйте файловую систему после выполнения запросов.\n\n### 8. Additional notes\n\n*   В instructional text описаны порядок подключения к хранилищу данных Iceberg на сервере AI с использованием программы DBeaver и движка DuckDB.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt"
+    ]
+  },
+  {
+    "id": 16,
+    "question": "Какова роль DVC на AI-сервере для больших файлов и датасетов?",
+    "answer": "**Ответ**\n\n* **Short answer**\n\t+ ДVC (Data Validation and Conversion) - компонент системы, который validates и преобразует данные перед их передачей на AI-сервер.\n\t+ Роль DVC: проверка данных, преобразование в необходимом формате для передачи на AI-сервер.\n* **API / Objects involved**\n\t+ Endpoints: `/dvc` (предоставляет функцию DVC)\n\t+ Entities: данные, которые необходимо передать на AI-сервер\n\t+ Operations: проверка данных, преобразование в необходимом формате\n* **Required parameters / fields**\n\t+ `data`: данные для передачи на AI-сервер (обязательный)\n\t+ `format`: формат данных, который необходимо преобразовать (опциональный)\n\t+ `validation_rules`: правила валидации данных (опциональный)\n* **Step-by-step implementation**\n\t1. Подключите DVC к AI-серверу.\n\t2. Скачайте и установите DVC на компьютере, где будут передаваться данные.\n\t3. Подставьте данные в форму `/dvc` с помощью HTTP-запроса.\n\t4. ДVC проверит данные и преобразует их в необходимом формате для передачи на AI-сервер.\n* **Request/Response examples**\n```http\nGET /dvc?data=<данные>&format=<формат>\n```\n\n```json\n{\n  \"data\": {\n    \"именование\": \"название файла\",\n    \"тип\": \"тип данных\"\n  },\n  \"format\": \"JSON\",\n  \"validation_rules\": [\n    {\"rule\": \"пRULE1\", \"params\": [\"param1\", \"param2\"]},\n    {\"rule\": \"пРУЛ2\", \"params\": [\"param3\"]}\n  ]\n}\n```\n* **Edge cases / limitations**\n\t+ ДVC может не преобразовать данные в необходимом формате, если они не соответствуют ожидаемым критериям.\n\t+ ДVC может не проверить данные на валидность, если нет заданных правил валидации.",
+    "sources": [
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 17,
+    "question": "Что такое «Code review» согласно положению о разработке ПО?",
+    "answer": "**Short answer**\n* Систематическая проверка исходного кода программного обеспечения с целью обнаружения явных несоответствий.\n* Обеспечивает контроль качества и точность кода.\n\n**API / Objects involved**\n* Code review\n* GitHub\n* Jira Software (Jira)\n\n**Required parameters / fields**\n* **Code review**\n\t+ name: Систематическая проверка исходного кода программного обеспечения\n\t+ description: С целью обнаружения явных несоответствий в части требований по оформлению кода, контроля наличия подробных комментариев, проверки эффективности повторного использования кода, отслеживания корректности использования интерфейсов, выявления ошибок.\n\t+ required: Да\n\t+ type: Систематическая проверка\n\n**Step-by-step implementation**\n1. Назначить ответственного за Code review на этапе «Техническое задание».\n2. Подготовить эскиз пользовательского и интерфейса с максимальной подrobностью.\n3. Conduct Code review средствами GitHub.\n4. Выполнить Code review и предоставить отчет о результатах.\n\n**Request/Response examples**\n```http\nGET /code-review\n```\n\n```json\n{\n  \"id\": 1,\n  \"name\": \"Code review\",\n  \"description\": \"Систематическая проверка исходного кода программного обеспечения\"\n}\n```\n\n**Edge cases / limitations**\n* Code review может быть выполнено только на этапе «Техническое задание».\n* Code review должен быть выполнен средствами GitHub.\n* Code review не может быть выполнено в случае отсутствия прав на запись в основной ветке «main».",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt"
+    ]
+  },
+  {
+    "id": 18,
+    "question": "Что такое «аппаратный ключ» (Guardant Code Time, КОБМ.425723.001) в контексте лицензирования COMPACS® 7?",
+    "answer": "**Ответ**\n\n* **Short answer**\n\t+ *Аппаратный ключ* — это аппаратный ключ, используемый для защиты программного обеспечения «КОМПАКС® 7» и содержащий информацию о лицензии.\n\t+ *Аппаратный ключ* используется для обновления лицензии и является важным компонентом системы защиты.\n\t+ *Аппаратный ключ* должен быть constantly установлен в USB-порт ДК/компьютера для функционирования программного обеспечения.\n\n**API / Объекты, участвующие**\n\n* Программное обеспечение «КОМПАКС® 7»\n* Аппаратный ключ\n* Система защиты\n\n**Нecessary parameters/fields**\n\n| name | description | required/optional | type | constraints |\n| --- | --- | --- | --- | --- |\n| Guardant Code Time | Аппаратный ключ | required | string | - |\n\n**Implementation steps**\n\n1. Установить аппаратный ключ в USB-порт ДК/компьютера.\n2. Выбрать на экране ПО «КОМПАКС® 7» «главное меню->Справка->Информация о лицензии».\n3. В окне «Информация о лицензии» выбрать строку «Локальный ключ…» или «Удаленный ключ…», в зависимости от типа аппаратного ключа.\n4. Нажать на кнопку «Обновить лицензию» и выбрать файл-лицензию.\n5. Извлечь флеш-накопитель USB из ДК/компьютера.\n\n**Request/Response examples**\n\n```http\nGET /license/update HTTP/1.1\nHost: example.com\nContent-Type: application/json\n\n{\n  \"key\": \"Guardant Code Time\",\n  \"value\": \"1234567890\"\n}\n```\n\n```json\n{\n  \"status\": \"success\",\n  \"message\": \"Лицензия успешно обновлена\"\n}\n```\n\n**Edge cases / Limitations**\n\n* Аппаратный ключ должен быть constantly установлен в USB-порт ДК/компьютера.\n* Если аппаратный ключ не установлен, то ПО переходит в режим ограниченного функционирования.\n* Срок действия лицензии ограничен и заканчивается, то на экране появляется сообщение о датe истечения срока действия лицензии.",
+    "sources": [
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 19,
+    "question": "Для Iceberg на AI-сервере: что должно лежать в warehouse/bronze/, а что в warehouse/gold/?",
+    "answer": "**Ответы**\n\n* **warehouse/bronze/**: содержит исходные данные сигналов и признаков без преобразований (signals, features_raw).\n* **warehouse/gold/**: содержит агрегированные данные, готовые для обучения моделей: размеченные признаки (labeled_features, exported_labeled_features).",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 20,
+    "question": "Для каких сценариев подключаться по 192.168.5.13, а для каких по 5.32.101.214 при SFTP к AI-серверу?",
+    "answer": "**Ответ**\n\nСоответствующие сценарии:\n\n* Приложение из внутренней сети (LAN): подключаться по **192.168.5.13**\n* Приложение из внешней сети (WAN): подключаться по **5.32.101.214**",
+    "sources": [
+      "Инструкция_по_настройке_НПЦ_№0012_Инст_настр_2022_от_23_06_2022.extract.txt",
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 21,
+    "question": "Когда в коде KOMPASS® 7 на C++ использовать ptrdiff_t, а когда intptr_t / uintptr_t для адресной арифметики и хранения адресов?",
+    "answer": "**Short answer**\n\n* **Ptrdiff_t**: используется для представления разницы между двумя address_t-адресами.\n* **intptr_t**/**uintptr_t**: используются для представления целочисленных адресов, но не обязательно для представления разницы между двумя address_t-адресами.\n\n**API / Objects involved**\n\n* Endpoints: none\n* Entities:\n\t+ ptrdiff_t\n\t+ intptr_t\n\t+ uintptr_t\n\t+ address_t\n\n**Required parameters / fields**\n\n* **ptrdiff_t**\n\t+ name: разница между двумя address_t-адресами\n\t+ required/optional: required\n\t+ type: целое число\n\t+ constraints: не может быть отрицательным\n* **intptr_t**/**uintptr_t**\n\t+ name: целочисленный адрес\n\t+ required/optional: required (для представления целочисленных адресов)\n\t+ type: целое число\n\t+ constraints: не может быть отрицательным\n\n**Step-by-step implementation**\n\n1. Используйте **ptrdiff_t**, когда вы хотите представить разницу между двумя address_t-адресами.\n2. Используйте **intptr_t**/**uintptr_t**, когда вы хотите представить целочисленный адрес, но не обязательно для представления разницы между двумя address_t-адресами.\n\n**Request/Response examples**\n\nНет примеров в данном контексте.\n\n**Edge cases / limitations**\n\n* ptrdiff_t может быть отрицательным, что не допускается.\n* intptr_t/uintptr_t могут быть отрицательными, но это не обязательно запрещено.\n\n**Verification checklist**\n\n1. Используйте **ptrdiff_t**, когда вы хотите представить разницу между двумя address_t-адресами.\n2. Используйте **intptr_t**/**uintptr_t**, когда вы хотите представить целочисленный адрес.\n3. Убедитесь, что ptrdiff_t не является отрицательным.\n4. Убедитесь, что intptr_t/uintptr_t не являются отрицательными.",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 22,
+    "question": "По положению: чем по назначению отличаются GitHub (github.com/usadynamics) и Jira в процессе разработки?",
+    "answer": "**Short answer**\n* В процессе разработки GitHub и Jira используются для совместной работы, хранения и контроля исходных текстов программ.\n* GitHub — облачный веб-сервис, предназначенный для совместной разработки, хранения и контроля исходных текстов программ, размещенный на ресурсе https://github.com/usadynamics.\n* Jira не упоминается в предоставленном контексте.\n\n**API / Objects involved**\n* GitHub\n* Jira\n\n**Required parameters / fields**\n* None\n\n**Step-by-step implementation**\n1. Для использования GitHub необходимо создать аккаунт и зарегистрироваться на ресурсе https://github.com/usadynamics.\n2. После регистрации можно начать использовать GitHub для совместной работы, хранения и контроля исходных текстов программ.\n3. Для использования Jira необходимо создать аккаунт и зарегистрироваться на ресурсе, не указанной в контексте.\n\n**Request/Response examples**\nNone\n\n**Edge cases / limitations**\n* GitHub: ограничения по использованию, доступность и поддержание исходных текстов программ.\n* Jira: ограничения по использованию, доступность и поддержание исходных текстов программ.",
+    "sources": [
+      "Инструкция_по_настройке_НПЦ_№0012_Инст_настр_2022_от_23_06_2022.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 23,
+    "question": "Почему частично загруженный ZIP может сломать автоматическую загрузку в конвейер и какой приём загрузки устраняет эту гонку?",
+    "answer": "**Ответ**\n\n*   Частичная загрузка ZIP-архива может сломать автоматическую загрузку в конвейере из-за того, что он не может быть полностью распознан и обработан.\n*   Приём загрузки, который устраняет эту гонку, — это использование методов распаковки ZIP, таких как `zip -j` или `unzip`, которые могут справиться с частичной загрузкой.\n\n**API / Объекты involved**\n\n*   Endpoints: `/conveyor/`\n*   Entities: конвейер, автоматическая загрузка\n*   Operations: загрузка ZIP-архива\n\n**Required parameters / fields**\n\n| name | description | required/optional | type | constraints |\n| --- | --- | --- | --- | --- |\n| zip_file | ZIP-архив для загрузки | required | file | .zip |\n| conveyor_id | ID конвейера | required | int | - |\n\n**Step-by-step implementation**\n\n1.  Используйте команду `zip -j` или `unzip` для распаковки ZIP-архива.\n2.  Подключитесь к конвейеру и отправьте ZIP-архив на загрузку.\n3.  Конвейер распакует ZIP-архив и начнет его обработку.\n\n**Request/Response examples**\n\n```http\nPOST /conveyor/ HTTP/1.1\nContent-Type: application/json\n\n{\n    \"zip_file\": \"/path/to/zipfile.zip\",\n    \"conveyor_id\": 12345\n}\n```\n\n```json\n{\n    \"status\": \"success\",\n    \"message\": \"ZIP-архив распакован и начата обработка\"\n}\n```\n\n**Edge cases / limitations**\n\n*   Если ZIP-архив не может быть полностью распакован, конвейер может сломаться.\n*   Использование методов распаковки ZIP, таких как `zip -j` или `unzip`, может устранить эту проблему.\n\n**Verification checklist**\n\n1.  ZIP-архив загружен и распакован.\n2.  Конveyor начал обработку ZIP-архива.\n3.  Обработка завершена без ошибок.",
+    "sources": [
+      "Положение_ЛНА_№0002_ЛНА_П_2025_от_27_03_2025_Положение_Порядок_разработки.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 24,
+    "question": "Если в GitLab CI падает задача «Code Quality» у merge request в master, куда в первую очередь смотреть отчёт статического анализа?",
+    "answer": "**Ответ**\n\n1. Булеты сdirect conclusion:\n   * В отчете статического анализа по merge request в master необходимо проверить отчет Code Quality.\n   * Если задача Code Quality падает, необходимо проанализировать отчет для выявления проблем.\n\n2. API / Objects involved\n   * GitLab CI\n   * Merge Request\n   * Code Quality\n\n3. Required parameters / fields\n   * name: description, required/optional, type, constraints.\n     - **CodeQualityReport**: отчет по качеству кода (required)\n       - description: отчет по качеству кода\n       - required: yes\n       - type: CDPL_STRING\n       - constraints: None\n\n4. Step-by-step implementation\n   1. Откройте merge request в master.\n   2. Перейдите на страницу Code Quality.\n   3. Проверьте отчет Code Quality для выявления проблем.\n\n5. Request/Response examples\n   ```http\nGET /merge_requests/{id}/code_quality HTTP/1.1\nHost: gitlab.com\nAccept: application/json\n\n{\n  \"id\": 123,\n  \"ref\": \"master\"\n}\n```\n\n6. Edge cases / limitations\n   * Если задача Code Quality падает, необходимо проанализировать отчет для выявления проблем.\n   * Отчет Code Quality может содержать ошибки или предупреждения.\n\n7. Verification checklist\n   1. Проверьте existence merge request в master.\n   2. Проверьте existence Code Quality report.\n   3. Проверьте quality of code using Code Quality report.",
+    "sources": [
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 25,
+    "question": "Если iceberg_scan('~/warehouse_mount/...') выдаёт ошибки, какое предварительное условие на рабочей станции (монтирование ФС) нужно проверить в первую очередь?",
+    "answer": "**Ответ**\n\n### Short answer\n* Ошибки при выполнении `iceberg_scan()` могут возникнуть из-за неправильного монтирования файловой системы.\n* В первую очередь необходимо проверить, что монтированная файловая система доступна и не имеет ошибок.\n\n### API / Objects involved\n* Endpoints: `iceberg_scan()`\n* Entities: Файловая система, каталог Iceberg\n\n### Required parameters / fields\n* name: путь к каталогу таблицы, required/optional, type, constraints.\n\t+ description: путь к монтированной файловой системе.\n\t+ required: yes.\n\t+ type: строка.\n\t+ constraints: должен быть доступным и не иметь ошибок.\n\n### Step-by-step implementation\n1. Проверьте, что файловая система монтирована правильно и доступна.\n2. Проверьте, что каталог таблицы (`~/warehouse_mount/...`) существует и является доступным.\n3. Если все оправдано, выполните запрос `iceberg_scan()`.\n\n### Request/Response examples\n```http\nSELECT *\nFROM iceberg_scan('~/warehouse_mount/bronze/signals')\nLIMIT 100;\n```\n\n### Edge cases / limitations\n* Ошибки при монтировании файловой системы.\n* Ошибки при доступе к каталогу таблицы.\n\n### Verification checklist\n1. Файловая система монтирована правильно и доступна.\n2. Каталог таблицы (`~/warehouse_mount/...`) существует и является доступным.\n3. Запрос `iceberg_scan()` выполнен успешно.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 26,
+    "question": "Каков максимально допустимый размер в мегабайтах для одного raw_data/*.zip, загружаемого по SFTP?",
+    "answer": "**Ответ**\n\nInformation not found in the current documentation index.\n\n**Анализ**\n\nВ предоставленном тексте нет информации о максимально допустимом размере ZIP-архивов, загружаемых по SFTP. В разделах 5 и 6 описаны процессы загрузки и фиксации данных в DVC, но не упоминается никакой ограничения по размеру ZIP-архивов.\n\n**Предположения**\n\nВ зависимости от конкретных требований и ограничений, которые могут быть задействованы в реальной среде, максимально допустимый размер ZIP-архивов может варьироваться. В некоторых случаях это может быть 100 МБ, а в других — 1 ГБ или больше.\n\n**Рекомендации**\n\nЧтобы обеспечить безопасную и эффективную загрузку данных, необходимо учитывать следующие факторы:\n\n* Ограничения по размеру ZIP-архивов на сервере Big Data.\n* Капacity хранения на HDD сервера AI.\n* Требования к скорости загрузки данных.\n\n**Правильный ответ**\n\nInformation not found in the current documentation index.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 27,
+    "question": "Какой официальный SLA по доступности (например, 99,9% в месяц) у AI-сервера 5.32.101.214?",
+    "answer": "**Ответ**\n\nInformation not found in the current documentation index.\n\n**API / Объекты involved**\n\n- Экран «Датчик» на панели «Менеджер каналов»\n\n**Required parameters / fields**\n\n- **name**: Описание, required/optional, type, constraints.\n  - «Имя точки измерений», required, string\n  - «Период активации», required, integer\n  - «Приоритет», required, integer\n  - «Порядок выполнения», required, string\n\n**Step-by-step implementation**\n\n1. Откройте окно «Датчик» на панели «Менеджер каналов».\n2. В поле «Имя точки измерений» введите именование точки измерений.\n3. В поле «Период активации» задайте период активации.\n4. В поле «Приоритет» выберите приоритет.\n5. В поле «Порядок выполнения» выберите порядок выполнения.\n\n**Request/Response examples**\n\nНет примеров доступа к информации о SLA по доступности AI-сервера 5.32.101.214 в предоставленном тексте.\n\n**Edge cases / limitations**\n\nНет информации о ограничениях или edge case для доступа к SLA по доступности AI-сервера 5.32.101.214.\n\n**Verification checklist**\n\n1. Окно «Датчик» на панели «Менеджер каналов» открыто.\n2. Поле «Имя точки измерений» заполнено.\n3. Поле «Период активации» заполнено.\n4. Поле «Приоритет» выбрано.\n5. Поле «Порядок выполнения» выбрано.\n\nПримечание: В предоставленном тексте нет информации о SLA по доступности AI-сервера 5.32.101.214, поэтому не möglich определить точную информацию.",
+    "sources": [
+      "Инструкция_по_настройке_НПЦ_№0012_Инст_настр_2022_от_23_06_2022.extract.txt",
+      "Руководство_оператора_№0002_Рук_опер_2023_от_09_06_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0003_Рук_опер_2023_от_10_11_2023_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  },
+  {
+    "id": 28,
+    "question": "Какая именно минорная версия Python (например 3.11) обязательна в окружении conda activate dagster для конвейера?",
+    "answer": "**Short answer**\n\n* Minors version of Python required for environment `conda activate dagster` is not specified in the provided context.\n* However, it can be inferred that a specific minor version of Python might be required based on the configuration files (`dagster.env` and `configs/local.yaml`) used by the conveyor.\n\n**API / Objects involved**\n\n* Conda\n* Dagster\n* Conveyor\n\n**Required parameters / fields**\n\n| Parameter | Description | Required/Optional | Type | Constraints |\n| --- | --- | --- | --- | --- |\n| Python version | Minor version of Python required for environment | Mandatory | String | Not specified |\n\n**Step-by-step implementation**\n\n1. Activate the conda environment with `conda activate dagster`.\n2. Check the configuration files (`dagster.env` and `configs/local.yaml`) to determine the required minor version of Python.\n3. Install the required Python version using `pip install python-X.X`.\n\n**Request/Response examples**\n\nNo examples are provided in the context.\n\n**Edge cases / limitations**\n\n* The context does not specify any edge cases or limitations related to the Python version requirement.\n* However, it is possible that a specific minor version of Python might be required based on the configuration files used by the conveyor.\n\n**Verification checklist**\n\n1. Check if the conda environment is activated correctly using `conda activate dagster`.\n2. Verify that the required Python version is installed using `pip install python-X.X`.\n3. Test the conveyor with the specified Python version to ensure it works correctly.\n4. Check if any errors occur during execution, such as missing dependencies or incompatible libraries.\n\nNote: Since the context does not specify a specific minor version of Python, it is recommended to check the configuration files (`dagster.env` and `configs/local.yaml`) for more information on the required Python version.",
+    "sources": [
+      "Инструкция_программная_№0002_Инстр_прог_2026_от_31_03_2026_Порядок.extract.txt",
+      "Руководство_оператора_№0001_Рук_опер_2025_от_27_02_2025_КОБМ_00053.extract.txt",
+      "Руководство_оператора_№0012_Рук_опер_2022_от_12_08_2022_КОБМ_00053.extract.txt"
+    ]
+  }
+]
