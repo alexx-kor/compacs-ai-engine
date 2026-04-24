@@ -1,27 +1,21 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-ПОЛНАЯ ОЦЕНКА RAG СИСТЕМЫ
-- Использует чанки из ClickHouse
-- Отвечает через GPT
-- Оценивает качество ответов
-- Сохраняет логи и результаты
-"""
+"""Run full RAG evaluation with OpenAI answers and local metric scoring."""
 
-import os
-import sys
-import json
-import time
-import logging
+from __future__ import annotations
+
 import argparse
+import json
+import logging
+import os
 import re
-from pathlib import Path
-from datetime import datetime
-from typing import Dict, List, Tuple
+import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
-# Добавляем путь к проекту
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import config
@@ -30,41 +24,17 @@ from core.embeddings import embedder
 from core.reranker import reranker
 from router.smart_router import select_prompt
 
-# OpenAI
 try:
     from openai import OpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
-    print("Warning: OpenAI not installed. Install with: pip install openai")
 
-# ============================================================
-# НАСТРОЙКА ЛОГИРОВАНИЯ
-# ============================================================
-
-log_dir = Path("logs")
-log_dir.mkdir(exist_ok=True)
-
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-log_file = log_dir / f"full_evaluation_{timestamp}.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 log = logging.getLogger(__name__)
 
-
-# ============================================================
-# КОНФИГУРАЦИЯ
-# ============================================================
-
 class GradeLevel(Enum):
+    """Discrete grade buckets."""
+
     EXCELLENT = "excellent"
     GOOD = "good"
     SATISFACTORY = "satisfactory"
@@ -73,23 +43,28 @@ class GradeLevel(Enum):
 
 @dataclass
 class MetricScores:
+    """Metric values in 0-10 range."""
+
     relevance: float = 0.0
     factuality: float = 0.0
     completeness: float = 0.0
     coherence: float = 0.0
     helpfulness: float = 0.0
     toxicity: float = 0.0
-    
-    def to_dict(self) -> Dict:
-        return {k: round(v, 2) for k, v in self.__dict__.items()}
+
+    def to_dict(self) -> dict[str, float]:
+        """Convert to rounded dictionary."""
+        return {key: round(value, 2) for key, value in self.__dict__.items()}
 
 
 @dataclass
 class EvaluationResult:
+    """Single question evaluation record."""
+
     id: int
     question: str
     answer: str
-    sources: List[Tuple[str, int]]
+    sources: list[tuple[str, int]]
     selected_prompt: str
     scores: MetricScores
     final_score: float
@@ -100,185 +75,128 @@ class EvaluationResult:
     explanation: str = ""
 
 
-# ============================================================
-# RAG С GPT
-# ============================================================
+class RagWithGpt:
+    """Answer questions via ClickHouse retrieval and OpenAI completion."""
 
-class RAGWithGPT:
-    """RAG система с использованием GPT"""
-    
-    def __init__(self):
-        self.client = None
+    def __init__(self) -> None:
+        self.client: Any | None = None
         self.gpt_model = "gpt-4o-mini"
-        
         if OPENAI_AVAILABLE:
-            api_key = os.getenv('OPENAI_API_KEY')
+            api_key = os.getenv("OPENAI_API_KEY")
             if api_key:
                 self.client = OpenAI(api_key=api_key)
-                logger.info(f"OpenAI client initialized with model: {self.gpt_model}")
+                log.info("openai client initialized model=%s", self.gpt_model)
             else:
-                logger.warning("OPENAI_API_KEY not found")
-    
-    def ask(self, question: str) -> Dict:
-        """Отвечает на вопрос используя RAG + GPT"""
-        
-        t_start = time.time()
-        
-        # 1. Поиск в ClickHouse
-        logger.debug(f"Generating embedding for: {question[:50]}...")
-        q_emb = list(embedder.generate_cached(question))
-        
-        logger.debug("Searching in ClickHouse...")
-        results = db.search(q_emb)
-        
-        if not results:
+                log.warning("OPENAI_API_KEY not found")
+
+    def ask(self, question: str) -> dict[str, Any]:
+        """Generate one answer using retrieval + GPT."""
+        started_at = time.time()
+        query_embedding = list(embedder.generate_cached(question))
+        retrieved = db.search(query_embedding)
+        if not retrieved:
             return {
-                'question': question,
-                'answer': "NOT FOUND in documentation",
-                'sources': [],
-                'selected_prompt': 'none',
-                'time_total': round(time.time() - t_start, 2),
-                'gpt_time': 0,
-                'tokens': 0
+                "question": question,
+                "answer": "NOT FOUND in documentation",
+                "sources": [],
+                "selected_prompt": "none",
+                "time_total": round(time.time() - started_at, 2),
+                "gpt_time": 0.0,
+                "tokens": 0,
             }
-        
-        # 2. Реранжинг
-        reranked = reranker.rerank(question, results)
-        
-        # 3. Контекст
-        context_parts = []
-        sources = []
-        for r in reranked[:config.rerank_top_k]:
-            chunk, source, page = r[0], r[1], r[2]
+
+        reranked = reranker.rerank(question, retrieved)
+        context_parts: list[str] = []
+        sources: list[tuple[str, int]] = []
+        for chunk, source, page, _distance in reranked[: config.rerank_top_k]:
             context_parts.append(f"[{source}, p.{page}]\n{chunk[:800]}")
             sources.append((source, page))
-        
         context = "\n\n".join(context_parts)
-        logger.debug(f"Context length: {len(context)} chars")
-        
-        # 4. Выбор промпта
-        system_prompt, num_predict, temperature = select_prompt(question)
-        
-        # Определяем тип промпта
+
+        system_prompt, _num_predict, temperature = select_prompt(question)
         if "parameter" in system_prompt.lower() and "list" not in system_prompt.lower():
             prompt_name = "API Parameter Prompt"
         elif "list of parameters" in system_prompt.lower():
             prompt_name = "API Parameters List Prompt"
         else:
             prompt_name = "API Info Prompt"
-        
-        logger.info(f"Selected prompt: {prompt_name}")
-        
-        # 5. Запрос к GPT
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"}
-        ]
-        
-        gpt_start = time.time()
+
         answer = ""
         tokens = 0
-        
-        if self.client:
+        gpt_started_at = time.time()
+        if self.client is not None:
             try:
                 response = self.client.chat.completions.create(
                     model=self.gpt_model,
-                    messages=messages,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"},
+                    ],
                     temperature=temperature,
-                    max_tokens=800
+                    max_tokens=800,
                 )
                 answer = response.choices[0].message.content
                 tokens = response.usage.total_tokens
-                logger.info(f"GPT response: {tokens} tokens, {time.time() - gpt_start:.2f}s")
-            except Exception as e:
-                answer = f"ERROR: {e}"
-                logger.error(f"GPT error: {e}")
+            except Exception as error:
+                answer = f"ERROR: {error}"
+                log.error("gpt request failed: %s", error)
         else:
             answer = "ERROR: OpenAI not available"
-        
-        gpt_time = time.time() - gpt_start
-        total_time = time.time() - t_start
-        
+
+        gpt_time = time.time() - gpt_started_at
         return {
-            'question': question,
-            'answer': answer,
-            'sources': sources,
-            'selected_prompt': prompt_name,
-            'time_total': round(total_time, 2),
-            'gpt_time': round(gpt_time, 2),
-            'tokens': tokens
+            "question": question,
+            "answer": answer,
+            "sources": sources,
+            "selected_prompt": prompt_name,
+            "time_total": round(time.time() - started_at, 2),
+            "gpt_time": round(gpt_time, 2),
+            "tokens": tokens,
         }
 
 
-# ============================================================
-# КАЛЬКУЛЯТОР МЕТРИК
-# ============================================================
-
 class MetricsCalculator:
-    """Вычисляет метрики качества ответа"""
-    
+    """Compute metric values for an answer."""
+
     @staticmethod
     def calculate_relevance(question: str, answer: str) -> float:
-        """Релевантность (0-10)"""
         if not question or not answer or answer.startswith("ERROR") or answer == "NOT FOUND in documentation":
             return 0.0
-        
-        q_words = set(re.findall(r'\b\w{4,}\b', question.lower()))
-        a_words = set(re.findall(r'\b\w{4,}\b', answer.lower()))
-        
-        if not q_words:
+        question_words = set(re.findall(r"\b\w{4,}\b", question.lower()))
+        answer_words = set(re.findall(r"\b\w{4,}\b", answer.lower()))
+        if not question_words:
             return 5.0
-        
-        intersection = len(q_words & a_words)
-        similarity = intersection / len(q_words)
-        return min(10.0, similarity * 12)
-    
+        return min(10.0, (len(question_words & answer_words) / len(question_words)) * 12)
+
     @staticmethod
     def calculate_factuality(answer: str) -> float:
-        """Фактологичность (0-10)"""
         if not answer or answer.startswith("ERROR"):
             return 0.0
-        
-        uncertain_markers = ['probably', 'maybe', 'perhaps', 'might', 'could',
-                            'возможно', 'вероятно', 'наверное']
-        
-        sentences = re.split(r'[.!?]+', answer)
-        if not sentences:
-            return 5.0
-        
-        uncertain_count = sum(1 for s in sentences 
-                             if any(m in s.lower() for m in uncertain_markers))
-        
-        factuality = max(0, 10 - uncertain_count * 2)
-        return min(10, factuality)
-    
+        uncertain_markers = ("probably", "maybe", "perhaps", "might", "could", "возможно", "вероятно", "наверное")
+        sentences = re.split(r"[.!?]+", answer)
+        uncertain = sum(1 for sentence in sentences if any(marker in sentence.lower() for marker in uncertain_markers))
+        return min(10.0, max(0.0, 10 - uncertain * 2))
+
     @staticmethod
     def calculate_completeness(question: str, answer: str) -> float:
-        """Полнота (0-10)"""
         if not answer or answer.startswith("ERROR") or answer == "NOT FOUND in documentation":
             return 0.0
-        
-        q_keywords = set(re.findall(r'\b\w{4,}\b', question.lower()))
-        a_keywords = set(re.findall(r'\b\w{4,}\b', answer.lower()))
-        
-        if not q_keywords:
+        question_words = set(re.findall(r"\b\w{4,}\b", question.lower()))
+        answer_words = set(re.findall(r"\b\w{4,}\b", answer.lower()))
+        if not question_words:
             return 7.0
-        
-        covered = len(q_keywords & a_keywords)
-        completeness = (covered / len(q_keywords)) * 10
-        return min(10, completeness)
-    
+        return min(10.0, (len(question_words & answer_words) / len(question_words)) * 10)
+
     @staticmethod
     def calculate_coherence(answer: str) -> float:
-        """Связность (0-10)"""
         if not answer or answer.startswith("ERROR"):
             return 0.0
-        
+
         # Структура
-        has_numbers = bool(re.search(r'\d+\.', answer))
-        has_bullets = bool(re.search(r'[-*•]', answer))
-        has_paragraphs = answer.count('\n\n') > 0
-        
+        has_numbers = bool(re.search(r"\d+\.", answer))
+        has_bullets = bool(re.search(r"[-*•]", answer))
+        has_paragraphs = answer.count("\n\n") > 0
+
         structure: float = 0
         if has_numbers:
             structure += 0.4
@@ -286,118 +204,40 @@ class MetricsCalculator:
             structure += 0.3
         if has_paragraphs:
             structure += 0.3
-        
+
         # Логические связки
-        connectors = ['поэтому', 'следовательно', 'во-первых', 'например',
-                     'therefore', 'thus', 'consequently', 'first', 'for example']
+        connectors = [
+            "поэтому",
+            "следовательно",
+            "во-первых",
+            "например",
+            "therefore",
+            "thus",
+            "consequently",
+            "first",
+            "for example",
+        ]
         connector_count = sum(1 for c in connectors if c in answer.lower())
         logic = min(0.5, connector_count * 0.1)
-        
+
         coherence = (structure + logic) * 10
         return min(10, coherence)
-    
+
     @staticmethod
     def calculate_helpfulness(answer: str) -> float:
-        """Полезность (0-10)"""
-        if not answer or answer.startswith("ERROR"):
+        if not answer or answer.startswith("ERROR") or answer == "NOT FOUND in documentation":
             return 0.0
-        
-        if answer == "NOT FOUND in documentation":
-            return 0.0
-        
-        # Длина ответа
         length_score = min(1.0, len(answer) / 500)
-        
-        # Наличие инструкций
-        has_instructions = any(w in answer.lower() for w in 
-                              ['как', 'следуйте', 'выполните', 'используйте',
-                               'how to', 'follow', 'use', 'write'])
-        
-        # Наличие примеров
-        has_example = bool(re.search(r'(example|например|sample|пример)', answer.lower()))
-        
-        helpfulness = length_score * 0.3
-        if has_instructions:
-            helpfulness += 0.4
-        if has_example:
-            helpfulness += 0.3
-        
-        return helpfulness * 10
-    
+        has_instructions = any(word in answer.lower() for word in ("как", "следуйте", "выполните", "используйте", "how to", "follow", "use"))
+        has_example = bool(re.search(r"(example|например|sample|пример)", answer.lower()))
+        score = length_score * 0.3 + (0.4 if has_instructions else 0.0) + (0.3 if has_example else 0.0)
+        return score * 10
+
     @staticmethod
     def calculate_toxicity(answer: str) -> float:
-        """Токсичность (0-10)"""
-        toxic_words = ['дурак', 'идиот', 'урод', 'stupid', 'idiot']
-        toxic_count = sum(1 for w in toxic_words if w in answer.lower())
-        return min(10, toxic_count * 2)
+        toxic_words = ("дурак", "идиот", "урод", "stupid", "idiot")
+        return min(10.0, sum(1 for word in toxic_words if word in answer.lower()) * 2)
 
-
-metrics = MetricsCalculator()
-
-
-# ============================================================
-# ОЦЕНЩИК
-# ============================================================
-
-class AnswerEvaluator:
-    """Оценивает ответы по метрикам"""
-    
-    @staticmethod
-    def evaluate(question: str, answer: str, time_seconds: float, tokens: int) -> EvaluationResult:
-        """Оценивает один ответ"""
-        
-        # Вычисляем метрики
-        scores = MetricScores(
-            relevance=metrics.calculate_relevance(question, answer),
-            factuality=metrics.calculate_factuality(answer),
-            completeness=metrics.calculate_completeness(question, answer),
-            coherence=metrics.calculate_coherence(answer),
-            helpfulness=metrics.calculate_helpfulness(answer),
-            toxicity=metrics.calculate_toxicity(answer)
-        )
-        
-        # Итоговая оценка
-        final_score = (
-            scores.relevance * 0.25 +
-            scores.factuality * 0.25 +
-            scores.completeness * 0.20 +
-            scores.coherence * 0.15 +
-            scores.helpfulness * 0.15
-        )
-        
-        # Штраф за токсичность
-        if scores.toxicity > 7:
-            final_score *= 0.5
-        
-        # Грейд
-        if final_score >= 9.0:
-            grade = GradeLevel.EXCELLENT
-        elif final_score >= 7.0:
-            grade = GradeLevel.GOOD
-        elif final_score >= 5.0:
-            grade = GradeLevel.SATISFACTORY
-        else:
-            grade = GradeLevel.POOR
-        
-        return EvaluationResult(
-            id=0,
-            question=question,
-            answer=answer,
-            sources=[],
-            selected_prompt="",
-            scores=scores,
-            final_score=round(final_score, 2),
-            grade=grade,
-            tokens_used=tokens,
-            time_seconds=time_seconds,
-            gpt_time_seconds=0,
-            explanation=f"{grade.value} quality"
-        )
-
-
-# ============================================================
-# ОСНОВНЫЕ ВОПРОСЫ
-# ============================================================
 
 QUESTIONS = {
     3: "Create a step by step guide how to integrate sale form",
@@ -413,167 +253,158 @@ QUESTIONS = {
 }
 
 
-# ============================================================
-# ОСНОВНАЯ ФУНКЦИЯ
-# ============================================================
+def configure_logging(log_file: Path, is_verbose: bool) -> None:
+    """Configure logger handlers for file and console."""
+    level = logging.DEBUG if is_verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()],
+    )
 
-def main():
-    parser = argparse.ArgumentParser(description='Full RAG Evaluation')
-    parser.add_argument('--questions', '-q', type=str, help='JSON file with questions (optional)')
-    parser.add_argument('--output', '-o', type=str, help='Output file for results')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
-    
-    args = parser.parse_args()
-    db.set_active_table("hypothesis")
-    log.info("[INFO] Using table: %s", db.get_active_table())
+
+def evaluate_response(question_id: int, question: str, response: dict[str, Any], calculator: MetricsCalculator) -> EvaluationResult:
+    """Build evaluation record from raw response."""
+    scores = MetricScores(
+        relevance=calculator.calculate_relevance(question, response["answer"]),
+        factuality=calculator.calculate_factuality(response["answer"]),
+        completeness=calculator.calculate_completeness(question, response["answer"]),
+        coherence=calculator.calculate_coherence(response["answer"]),
+        helpfulness=calculator.calculate_helpfulness(response["answer"]),
+        toxicity=calculator.calculate_toxicity(response["answer"]),
+    )
+    final_score = (
+        scores.relevance * 0.25
+        + scores.factuality * 0.25
+        + scores.completeness * 0.20
+        + scores.coherence * 0.15
+        + scores.helpfulness * 0.15
+    )
+    if scores.toxicity > 7:
+        final_score *= 0.5
+    grade = GradeLevel.EXCELLENT if final_score >= 9 else GradeLevel.GOOD if final_score >= 7 else GradeLevel.SATISFACTORY if final_score >= 5 else GradeLevel.POOR
+    return EvaluationResult(
+        id=question_id,
+        question=question,
+        answer=response["answer"],
+        sources=response["sources"],
+        selected_prompt=response["selected_prompt"],
+        scores=scores,
+        final_score=round(final_score, 2),
+        grade=grade,
+        tokens_used=response.get("tokens", 0),
+        time_seconds=response["time_total"],
+        gpt_time_seconds=response["gpt_time"],
+        explanation=f"{grade.value} quality",
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments."""
+    parser = argparse.ArgumentParser(description="Full RAG evaluation.")
+    parser.add_argument("--questions", "-q", help="JSON file with questions")
+    parser.add_argument("--output", "-o", help="Output file for results")
+    parser.add_argument("--verbose", "-v", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Run full evaluation pipeline."""
+    args = parse_args()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = Path("logs") / f"full_evaluation_{timestamp}.log"
+    log_file.parent.mkdir(exist_ok=True)
+    configure_logging(log_file=log_file, is_verbose=args.verbose)
+    db.set_active_table("hypothesis")  # type: ignore[attr-defined]
+    log.info("[INFO] Using table: %s", db.get_active_table())  # type: ignore[attr-defined]
     log.info("[INFO] Chunks in database: %s", db.get_chunk_count())
-    
-    logger.info("="*80)
-    logger.info("FULL RAG EVALUATION STARTED")
-    logger.info(f"Log file: {log_file}")
-    logger.info("="*80)
-    
-    # Проверка БД
     chunk_count = db.get_chunk_count()
-    logger.info(f"Database chunks: {chunk_count}")
-    
+    log.info("database chunks=%s", chunk_count)
     if chunk_count == 0:
-        logger.error("No chunks in database! Run load_graph_chunks.py first")
-        return
-    
-    # Инициализация RAG
-    rag = RAGWithGPT()
-    evaluator = AnswerEvaluator()
-    
-    # Загрузка вопросов
-    questions_to_ask = QUESTIONS
-    
-    if args.questions and os.path.exists(args.questions):
-        with open(args.questions, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                questions_to_ask = {i+1: item.get('question', str(item)) for i, item in enumerate(data)}
-            elif isinstance(data, dict) and 'questions' in data:
-                questions_to_ask = {i+1: q for i, q in enumerate(data['questions'])}
-    
-    logger.info(f"Processing {len(questions_to_ask)} questions")
-    
-    # Обработка
-    results = []
-    
-    for qid, question in questions_to_ask.items():
-        logger.info(f"\n{'='*60}")
-        logger.info(f"Q{qid}: {question[:80]}...")
-        logger.info(f"{'='*60}")
-        
-        # Получаем ответ от RAG
+        log.error("no chunks in database, run load_graph_chunks.py first")
+        return 1
+
+    rag = RagWithGpt()
+    metrics = MetricsCalculator()
+    questions_to_ask = QUESTIONS.copy()
+    if args.questions and Path(args.questions).exists():
+        with Path(args.questions).open("r", encoding="utf-8") as file_handle:
+            payload = json.load(file_handle)
+        if isinstance(payload, list):
+            questions_to_ask = {i + 1: item.get("question", str(item)) for i, item in enumerate(payload)}
+        elif isinstance(payload, dict) and "questions" in payload:
+            questions_to_ask = {i + 1: question for i, question in enumerate(payload["questions"])}
+
+    results: list[EvaluationResult] = []
+    for question_id, question in questions_to_ask.items():
         response = rag.ask(question)
-        
-        # Оцениваем
-        evaluation = evaluator.evaluate(
-            question=question,
-            answer=response['answer'],
-            time_seconds=response['time_total'],
-            tokens=response.get('tokens', 0)
-        )
-        evaluation.id = qid
-        evaluation.sources = response['sources']
-        evaluation.selected_prompt = response['selected_prompt']
-        
+        evaluation = evaluate_response(question_id, question, response, metrics)
         results.append(evaluation)
-        
-        # Логируем
-        logger.info(f"Answer: {response['answer'][:200]}...")
-        logger.info(f"Scores: R={evaluation.scores.relevance:.1f}, F={evaluation.scores.factuality:.1f}, C={evaluation.scores.completeness:.1f}")
-        logger.info(f"Final score: {evaluation.final_score:.1f}/10 ({evaluation.grade.value})")
-        logger.info(f"Time: {response['time_total']}s, Tokens: {response.get('tokens', 0)}")
-    
-    # Статистика
+        log.info("qid=%s score=%.2f grade=%s time=%s tokens=%s", question_id, evaluation.final_score, evaluation.grade.value, evaluation.time_seconds, evaluation.tokens_used)
+
     total = len(results)
-    avg_score = sum(r.final_score for r in results) / total
-    avg_time = sum(r.time_seconds for r in results) / total
-    avg_tokens = sum(r.tokens_used for r in results) / total
-    
-    excellent = sum(1 for r in results if r.grade == GradeLevel.EXCELLENT)
-    good = sum(1 for r in results if r.grade == GradeLevel.GOOD)
-    satisfactory = sum(1 for r in results if r.grade == GradeLevel.SATISFACTORY)
-    poor = sum(1 for r in results if r.grade == GradeLevel.POOR)
-    
-    logger.info("\n" + "="*80)
-    logger.info("FINAL STATISTICS")
-    logger.info("="*80)
-    logger.info(f"Total questions: {total}")
-    logger.info(f"Average score: {avg_score:.1f}/10")
-    logger.info(f"Average time: {avg_time:.1f}s")
-    logger.info(f"Average tokens: {avg_tokens:.0f}")
-    logger.info("")
-    logger.info("Grade distribution:")
-    logger.info(f"  Excellent: {excellent} ({excellent/total*100:.1f}%)")
-    logger.info(f"  Good: {good} ({good/total*100:.1f}%)")
-    logger.info(f"  Satisfactory: {satisfactory} ({satisfactory/total*100:.1f}%)")
-    logger.info(f"  Poor: {poor} ({poor/total*100:.1f}%)")
-    
-    # Сохраняем результаты
-    output_file = args.output if args.output else f"evaluation_results_{timestamp}.json"
-    
-    output_data = {
-        'timestamp': datetime.now().isoformat(),
-        'config': {
-            'model': rag.gpt_model,
-            'chunks': chunk_count,
-            'questions': total
+    avg_score = sum(item.final_score for item in results) / total
+    avg_time = sum(item.time_seconds for item in results) / total
+    avg_tokens = sum(item.tokens_used for item in results) / total
+    excellent = sum(1 for item in results if item.grade == GradeLevel.EXCELLENT)
+    good = sum(1 for item in results if item.grade == GradeLevel.GOOD)
+    satisfactory = sum(1 for item in results if item.grade == GradeLevel.SATISFACTORY)
+    poor = sum(1 for item in results if item.grade == GradeLevel.POOR)
+
+    output_file = Path(args.output) if args.output else Path(f"evaluation_results_{timestamp}.json")
+    output_payload = {
+        "timestamp": datetime.now().isoformat(),
+        "config": {"model": rag.gpt_model, "chunks": chunk_count, "questions": total},
+        "statistics": {
+            "avg_score": round(avg_score, 2),
+            "avg_time": round(avg_time, 2),
+            "avg_tokens": round(avg_tokens, 0),
+            "excellent": excellent,
+            "good": good,
+            "satisfactory": satisfactory,
+            "poor": poor,
         },
-        'statistics': {
-            'avg_score': round(avg_score, 2),
-            'avg_time': round(avg_time, 2),
-            'avg_tokens': round(avg_tokens, 0),
-            'excellent': excellent,
-            'good': good,
-            'satisfactory': satisfactory,
-            'poor': poor
-        },
-        'results': [
+        "results": [
             {
-                'id': r.id,
-                'question': r.question,
-                'answer': r.answer,
-                'sources': [(s[0], s[1]) for s in r.sources],
-                'selected_prompt': r.selected_prompt,
-                'scores': r.scores.to_dict(),
-                'final_score': r.final_score,
-                'grade': r.grade.value,
-                'tokens': r.tokens_used,
-                'time': r.time_seconds,
-                'explanation': r.explanation
+                "id": item.id,
+                "question": item.question,
+                "answer": item.answer,
+                "sources": [(source, page) for source, page in item.sources],
+                "selected_prompt": item.selected_prompt,
+                "scores": item.scores.to_dict(),
+                "final_score": item.final_score,
+                "grade": item.grade.value,
+                "tokens": item.tokens_used,
+                "time": item.time_seconds,
+                "explanation": item.explanation,
             }
-            for r in results
-        ]
+            for item in results
+        ],
     }
-    
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=2)
-    
-    logger.info(f"\n Results saved to: {output_file}")
-    logger.info(f" Log saved to: {log_file}")
-    
-    # Вывод таблицы
-    print("\n" + "="*80)
-    print("RESULTS SUMMARY")
-    print("="*80)
-    print(f"{'ID':<4} {'SCORE':<8} {'GRADE':<14} {'TIME':<8} {'TOKENS':<8}")
-    print("-"*80)
-    
-    for r in results:
-        grade_icon = "Excellent" if r.grade == GradeLevel.EXCELLENT else "good" if r.grade == GradeLevel.GOOD else "SATISFACTORY" if r.grade == GradeLevel.SATISFACTORY else "POOR"
-        print(f"{r.id:<4} {r.final_score:<8.1f} {grade_icon} {r.grade.value:<12} {r.time_seconds:<8.1f} {r.tokens_used:<8}")
-    
-    print("-"*80)
-    print(f"\nAverage: {avg_score:.1f}/10")
-    
-    logger.info("="*80)
-    logger.info("EVALUATION COMPLETED")
-    logger.info("="*80)
+    with output_file.open("w", encoding="utf-8") as file_handle:
+        json.dump(output_payload, file_handle, ensure_ascii=False, indent=2)
+
+    log.info("results saved to=%s", output_file)
+    log.info("log file=%s", log_file)
+    log.info("")
+    log.info("Grade distribution:")
+    log.info("  Excellent: %s (%.1f%%)", excellent, excellent / total * 100)
+    log.info("  Good: %s (%.1f%%)", good, good / total * 100)
+    log.info("  Satisfactory: %s (%.1f%%)", satisfactory, satisfactory / total * 100)
+    log.info("  Poor: %s (%.1f%%)", poor, poor / total * 100)
+    log.info(
+        "summary total=%s avg_score=%.2f avg_time=%.2f avg_tokens=%.0f excellent=%s good=%s satisfactory=%s poor=%s",
+        total,
+        avg_score,
+        avg_time,
+        avg_tokens,
+        excellent,
+        good,
+        satisfactory,
+        poor,
+    )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
