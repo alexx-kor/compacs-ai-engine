@@ -5,10 +5,12 @@
 ## 1) Сборка окружения
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+uv venv .venv
+source .venv/Scripts/activate  # Windows Git Bash
+uv pip install -r requirements.txt
 ```
+
+`uv` automatically uses `.venv` in the current directory. No manual activation needed when using `uv run`.
 
 Подготовка моделей Ollama:
 
@@ -21,7 +23,7 @@ ollama serve
 При необходимости задайте ключ OpenAI:
 
 ```bash
-set OPENAI_API_KEY=your_key
+export OPENAI_API_KEY=your_key
 ```
 
 ## 2) Порядок запуска
@@ -37,19 +39,19 @@ flowchart LR
 ## 3) Индексация данных (`instructions` -> ClickHouse)
 
 ```bash
-python load_graph_chunks.py
+uv run python load_graph_chunks.py
 ```
 
 Без пересоздания таблицы:
 
 ```bash
-python load_graph_chunks.py --no-force-recreate
+uv run python load_graph_chunks.py --no-force-recreate
 ```
 
 ## 4) Генерация baseline-ответов
 
 ```bash
-python baseline/run_gpu_baseline.py
+uv run python baseline/run_gpu_baseline.py
 ```
 
 Результат: `baseline/rag_answers_gpu.json`
@@ -57,19 +59,19 @@ python baseline/run_gpu_baseline.py
 ## 5) Оценка качества
 
 ```bash
-python llm_evaluate.py --main <main.json> --hypothesis <hyp.json>
+uv run python llm_evaluate.py --main <main.json> --hypothesis <hyp.json>
 ```
 
 или полный прогон:
 
 ```bash
-python full_evaluation.py
+uv run python full_evaluation.py
 ```
 
 ## 6) Сравнение прогонов
 
 ```bash
-python compare_results.py --old <old.csv|old.json> --new <new.json>
+uv run python compare_results.py --old <old.csv|old.json> --new <new.json>
 ```
 
 ## 7) Ключевые файлы
