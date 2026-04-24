@@ -17,7 +17,28 @@ ollama serve
 set OPENAI_API_KEY=your_key
 ```
 
-## 2) Main Baseline Pipeline
+## 2) Data Preprocessing Pipeline (Instructions -> ClickHouse)
+
+Предзагрузка и индексация `instructions` в ClickHouse:
+
+```bash
+python load_graph_chunks.py
+```
+
+Без очистки таблицы:
+
+```bash
+python load_graph_chunks.py --no-force-recreate
+```
+
+```mermaid
+flowchart LR
+    A[instructions/*.txt] --> B[Chunking]
+    B --> C[Embeddings nomic-embed-text]
+    C --> D[ClickHouse default.rag_chunks]
+```
+
+## 3) Main Baseline Pipeline
 
 Запуск генерации ответов:
 
@@ -41,7 +62,7 @@ flowchart LR
     G --> H[baseline/rag_answers_gpu.json]
 ```
 
-## 3) Evaluation Pipeline
+## 4) Evaluation Pipeline
 
 Оценка качества LLM-судьей:
 
@@ -63,7 +84,7 @@ flowchart LR
     B --> E[evaluation_results_*.json]
 ```
 
-## 4) Compare Runs
+## 5) Compare Runs
 
 Сравнение двух прогонов:
 
@@ -78,10 +99,11 @@ flowchart LR
     C --> D[comparison report]
 ```
 
-## 5) Important Paths
+## 6) Important Paths
 
 - Data source: `instructions/`
 - Questions: `baseline/questions`
 - Golden set: `baseline/golden_set.json`
 - Generated answers: `baseline/rag_answers_gpu.json`
 - Main script: `baseline/run_gpu_baseline.py`
+- Preprocessing script: `load_graph_chunks.py`
