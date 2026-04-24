@@ -2,6 +2,28 @@
 
 Короткая инструкция по сборке окружения и запуску пайплайнов.
 
+## 0) Установка uv
+
+[uv](https://docs.astral.sh/uv/) — быстрый менеджер пакетов и окружений для Python.
+
+**Linux / macOS / Windows Git Bash:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+```
+
+**Windows PowerShell:**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**Проверка:**
+```bash
+uv --version  # uv 0.x.x
+```
+
+> Если `uv` не найден после установки — перезапустите терминал или выполните `source $HOME/.local/bin/env` (Git Bash).
+
 ## 1) Сборка окружения
 
 ```bash
