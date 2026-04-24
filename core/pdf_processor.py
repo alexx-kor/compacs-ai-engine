@@ -1,19 +1,24 @@
-﻿import re
+"""PDF document extraction and chunking utilities."""
+
 import hashlib
-from typing import List, Dict, Tuple
+import logging
+import re
+
 from pypdf import PdfReader
+
 from config import config
-from core.embeddings import embedder
+
+log = logging.getLogger(__name__)
 
 
 class PDFProcessor:
     @staticmethod
-    def extract_pdf(pdf_path: str, source_name: str) -> List[Tuple[int, str]]:
+    def extract_pdf(pdf_path: str, source_name: str) -> list[tuple[int, str]]:
         try:
             reader = PdfReader(pdf_path)
             total_pages = len(reader.pages)
-            print(f"    Total pages: {total_pages}")
-            
+            log.info("pdf total pages=%s", total_pages)
+
             pages = []
             for i in range(total_pages):
                 try:
@@ -22,20 +27,21 @@ class PDFProcessor:
                     if text and len(text.strip()) > config.min_chunk_size:
                         text = re.sub(r'\n+', ' ', text)
                         pages.append((i + 1, text.strip()))
-                except:
-                    pass
+                except Exception as exc:
+                    log.exception("failed extracting pdf page index=%s source=%s: %s", i, source_name, exc)
+                    raise
             return pages
         except Exception as e:
-            print(f"    Error: {e}")
+            log.error("pdf extraction failed path=%s error=%s", pdf_path, e)
             return []
-    
+
     @staticmethod
-    def split_chunks(text: str) -> List[str]:
+    def split_chunks(text: str) -> list[str]:
         size = config.chunk_size
         words = text.split()
         chunks = []
         step = size - config.chunk_overlap
-        
+
         for i in range(0, len(words), step):
             chunk = ' '.join(words[i:i+size])
             if len(chunk) > config.min_chunk_size:
@@ -43,16 +49,16 @@ class PDFProcessor:
                 if len(chunks) >= config.max_chunks_per_doc:
                     break
         return chunks
-    
+
     @staticmethod
-    def process_document(pdf_path: str, source_name: str, start_id: int) -> List[Dict]:
-        print(f"\n Processing: {source_name}")
+    def process_document(pdf_path: str, source_name: str, start_id: int) -> list[dict]:
+        log.info("processing pdf source=%s", source_name)
         pages = PDFProcessor.extract_pdf(pdf_path, source_name)
-        
+
         if not pages:
             return []
-        
-        chunks = []
+
+        chunks: list[dict] = []
         for page_num, text in pages:
             for chunk in PDFProcessor.split_chunks(text):
                 if len(chunk) > config.max_text_length:
@@ -69,8 +75,8 @@ class PDFProcessor:
                     break
             if len(chunks) >= config.max_chunks_per_doc:
                 break
-        
-        print(f"    Created {len(chunks)} chunks")
+
+        log.info("created chunks source=%s count=%s", source_name, len(chunks))
         return chunks
 
 
