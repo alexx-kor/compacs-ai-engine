@@ -17,8 +17,8 @@ import argparse
 import re
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass, field
+from typing import Dict, List, Tuple
+from dataclasses import dataclass
 from enum import Enum
 
 # Добавляем путь к проекту
@@ -29,13 +29,6 @@ from core.database import db
 from core.embeddings import embedder
 from core.reranker import reranker
 from router.smart_router import select_prompt
-# В самом начале, после импортов
-from core.database import db
-
-# Переключаемся на правильную таблицу
-db.set_active_table("hypothesis")
-print(f"[INFO] Using table: {db.get_active_table()}")
-print(f"[INFO] Chunks in database: {db.get_chunk_count()}")
 
 # OpenAI
 try:
@@ -64,6 +57,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -285,7 +279,7 @@ class MetricsCalculator:
         has_bullets = bool(re.search(r'[-*•]', answer))
         has_paragraphs = answer.count('\n\n') > 0
         
-        structure = 0
+        structure: float = 0
         if has_numbers:
             structure += 0.4
         if has_bullets:
@@ -430,6 +424,9 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     
     args = parser.parse_args()
+    db.set_active_table("hypothesis")
+    log.info("[INFO] Using table: %s", db.get_active_table())
+    log.info("[INFO] Chunks in database: %s", db.get_chunk_count())
     
     logger.info("="*80)
     logger.info("FULL RAG EVALUATION STARTED")
@@ -509,8 +506,8 @@ def main():
     logger.info(f"Average score: {avg_score:.1f}/10")
     logger.info(f"Average time: {avg_time:.1f}s")
     logger.info(f"Average tokens: {avg_tokens:.0f}")
-    logger.info(f"")
-    logger.info(f"Grade distribution:")
+    logger.info("")
+    logger.info("Grade distribution:")
     logger.info(f"  Excellent: {excellent} ({excellent/total*100:.1f}%)")
     logger.info(f"  Good: {good} ({good/total*100:.1f}%)")
     logger.info(f"  Satisfactory: {satisfactory} ({satisfactory/total*100:.1f}%)")
