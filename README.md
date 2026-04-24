@@ -1,109 +1,82 @@
-# MCP Layer: Pipeline Quickstart
+# MCP Layer: Build & Run Guide
 
-Минимальная документация по запуску пайплайнов на данных из `instructions` и `baseline`.
+Короткая инструкция по сборке окружения и запуску пайплайнов.
 
-## 1) Setup
+## 1) Сборка окружения
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+Подготовка моделей Ollama:
+
+```bash
 ollama pull nomic-embed-text
 ollama pull llama3.2:3b
 ollama serve
 ```
 
-Опционально для OpenAI-пайплайнов:
+При необходимости задайте ключ OpenAI:
 
 ```bash
 set OPENAI_API_KEY=your_key
 ```
 
-## 2) Data Preprocessing Pipeline (Instructions -> ClickHouse)
+## 2) Порядок запуска
 
-Предзагрузка и индексация `instructions` в ClickHouse:
+```mermaid
+flowchart LR
+    A[Build env] --> B[load_graph_chunks.py]
+    B --> C[baseline/run_gpu_baseline.py]
+    C --> D[llm_evaluate.py / full_evaluation.py]
+    D --> E[compare_results.py]
+```
+
+## 3) Индексация данных (`instructions` -> ClickHouse)
 
 ```bash
 python load_graph_chunks.py
 ```
 
-Без очистки таблицы:
+Без пересоздания таблицы:
 
 ```bash
 python load_graph_chunks.py --no-force-recreate
 ```
 
-```mermaid
-flowchart LR
-    A[instructions/*.txt] --> B[Chunking]
-    B --> C[Embeddings nomic-embed-text]
-    C --> D[ClickHouse default.rag_chunks]
-```
-
-## 3) Main Baseline Pipeline
-
-Запуск генерации ответов:
+## 4) Генерация baseline-ответов
 
 ```bash
 python baseline/run_gpu_baseline.py
 ```
 
-Результат:
+Результат: `baseline/rag_answers_gpu.json`
 
-- `baseline/rag_answers_gpu.json`
-
-```mermaid
-flowchart LR
-    A[baseline/questions] --> B[Retriever]
-    D[instructions] --> B
-    B --> C{ClickHouse available?}
-    C -- yes --> E[Vector search]
-    C -- no --> F[Token fallback]
-    E --> G[LLM synthesis llama3.2:3b]
-    F --> G
-    G --> H[baseline/rag_answers_gpu.json]
-```
-
-## 4) Evaluation Pipeline
-
-Оценка качества LLM-судьей:
+## 5) Оценка качества
 
 ```bash
-python llm_evaluate.py
+python llm_evaluate.py --main <main.json> --hypothesis <hyp.json>
 ```
 
-Полный eval-контур:
+или полный прогон:
 
 ```bash
 python full_evaluation.py
 ```
 
-```mermaid
-flowchart LR
-    A[rag_answers_gpu.json] --> B[LLM Judge]
-    C[baseline/golden_set.json] --> B
-    B --> D[llm_evaluation/*]
-    B --> E[evaluation_results_*.json]
-```
-
-## 5) Compare Runs
-
-Сравнение двух прогонов:
+## 6) Сравнение прогонов
 
 ```bash
-python compare_results.py
+python compare_results.py --old <old.csv|old.json> --new <new.json>
 ```
 
-```mermaid
-flowchart LR
-    A[Old run JSON/CSV] --> C[compare_results.py]
-    B[New run JSON] --> C
-    C --> D[comparison report]
-```
+## 7) Ключевые файлы
 
-## 6) Important Paths
-
-- Data source: `instructions/`
-- Questions: `baseline/questions`
-- Golden set: `baseline/golden_set.json`
-- Generated answers: `baseline/rag_answers_gpu.json`
-- Main script: `baseline/run_gpu_baseline.py`
-- Preprocessing script: `load_graph_chunks.py`
+- `instructions/` — исходные документы
+- `baseline/questions` — вопросы
+- `baseline/golden_set.json` — эталон
+- `baseline/rag_answers_gpu.json` — сгенерированные ответы
+- `load_graph_chunks.py` — предобработка и загрузка чанков
+- `baseline/run_gpu_baseline.py` — основной RAG пайплайн
