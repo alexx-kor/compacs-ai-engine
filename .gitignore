@@ -42,3 +42,18 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Generated RAG/evaluation artifacts
+baseline/rag_answers_gpu.json
+logs/
+comparison/
+llm_evaluation/
+gpt_evaluation/
+evaluation_results_*.json
+answers_*/
+*.stackdump
+
+# Local secret text files (defensive)
+*password*.txt
+*secret*.txt
+*api*key*.txt
