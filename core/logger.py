@@ -4,14 +4,13 @@
 Структурированное логирование для RAG системы
 """
 
-import os
 import json
-import time
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
 from logging.handlers import RotatingFileHandler
+
+log = logging.getLogger(__name__)
 
 
 class StructuredLogger:
@@ -38,8 +37,9 @@ class StructuredLogger:
                 self.logger.removeHandler(h)
                 try:
                     h.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.exception("failed closing log handler: %s", exc)
+                    raise
         
         # Хендлер для файла
         file_handler = RotatingFileHandler(
@@ -63,10 +63,10 @@ class StructuredLogger:
         
         # Контекст для текущей операции
         self._stage = "init"
-        self._context = {}
-        
+        self._context: dict[str, str] = {}
+
         # Статистика по запуску
-        self.stats = {
+        self.stats: dict[str, int | float] = {
             'embed_calls_gpu': 0,
             'embed_calls_cpu': 0,
             'total_chunks': 0,
@@ -81,7 +81,7 @@ class StructuredLogger:
         # Логируем старт
         self.log_run_start()
     
-    def set_stage(self, stage: str):
+    def set_stage(self, stage: str) -> None:
         """Устанавливает текущую стадию пайплайна"""
         self._stage = stage
     
@@ -103,7 +103,7 @@ class StructuredLogger:
     # RUN LOGGING
     # ========================================================================
     
-    def log_run_start(self):
+    def log_run_start(self) -> None:
         """Логирует начало запуска"""
         self._log(
             "run.start",
@@ -112,7 +112,7 @@ class StructuredLogger:
             timestamp=datetime.now().isoformat()
         )
     
-    def log_run_end(self):
+    def log_run_end(self) -> None:
         """Логирует завершение запуска"""
         self._log(
             "run.end",
@@ -124,7 +124,7 @@ class StructuredLogger:
     # OLLAMA BACKEND CHECK
     # ========================================================================
     
-    def log_ollama_backend(self, compute: str, vram_mb: int):
+    def log_ollama_backend(self, compute: str, vram_mb: int) -> None:
         """Логирует информацию о бэкенде Ollama"""
         self.set_stage("init")
         self._log(
@@ -146,7 +146,7 @@ class StructuredLogger:
     # EMBEDDING LOGGING
     # ========================================================================
     
-    def log_embed_call(self, model: str, input_chars: int, latency_ms: float, batching: str = "sequential"):
+    def log_embed_call(self, model: str, input_chars: int, latency_ms: float, batching: str = "sequential") -> None:
         """Логирует вызов эмбеддинга"""
         self.set_stage("embed")
         
@@ -171,7 +171,7 @@ class StructuredLogger:
         # Обновляем статистику
         self.stats['total_embed_time_ms'] += latency_ms
     
-    def log_ollama_backend_embed(self, model: str, compute: str, vram_mb: int):
+    def log_ollama_backend_embed(self, model: str, compute: str, vram_mb: int) -> None:
         """Логирует информацию о бэкенде при эмбеддинге"""
         self.set_stage("embed")
         self._log(
@@ -190,7 +190,7 @@ class StructuredLogger:
     # UPSTREAM ERRORS
     # ========================================================================
     
-    def log_upstream_5xx(self, subsystem: str, status_code: int, message: str = ""):
+    def log_upstream_5xx(self, subsystem: str, status_code: int, message: str = "") -> None:
         """Логирует ошибки 5xx от апстрима"""
         self.set_stage("upstream")
         self._log(
@@ -204,8 +204,8 @@ class StructuredLogger:
     # INGESTION LOGGING
     # ========================================================================
     
-    def log_ingest_file(self, filename: str, source_type: str, chunk_count: int, 
-                        embedding_time_ms: float, total_time_ms: float):
+    def log_ingest_file(self, filename: str, source_type: str, chunk_count: int,
+                        embedding_time_ms: float, total_time_ms: float) -> None:
         """Логирует обработку одного файла"""
         self.set_stage("ingest")
         
@@ -231,7 +231,7 @@ class StructuredLogger:
         self.stats['files_processed'] += 1
         self.stats['total_chunks'] += chunk_count
     
-    def log_ingest_soft_skip(self, filename: str, reason: str, file_size_bytes: int):
+    def log_ingest_soft_skip(self, filename: str, reason: str, file_size_bytes: int) -> None:
         """Логирует пропуск файла"""
         self.set_stage("ingest")
         self._log(
@@ -243,7 +243,7 @@ class StructuredLogger:
         )
         self.stats['skipped_files'] += 1
     
-    def log_ingest_backend_summary(self):
+    def log_ingest_backend_summary(self) -> None:
         """Логирует сводку по бэкенду"""
         self.set_stage("ingest")
         total_calls = self.stats['embed_calls_gpu'] + self.stats['embed_calls_cpu']
@@ -257,7 +257,7 @@ class StructuredLogger:
             fallback_rate=f"{fallback_rate:.1f}%"
         )
     
-    def log_ingest_batch_summary(self, wall_clock_ms: float):
+    def log_ingest_batch_summary(self, wall_clock_ms: float) -> None:
         """Логирует сводку по батчу"""
         self.set_stage("ingest")
         avg_ms_per_chunk = wall_clock_ms / self.stats['total_chunks'] if self.stats['total_chunks'] > 0 else 0
@@ -276,7 +276,7 @@ class StructuredLogger:
     # CHROMA OPERATIONS
     # ========================================================================
     
-    def log_chroma_pre_clean(self, collection: str, items_deleted: int, latency_ms: float):
+    def log_chroma_pre_clean(self, collection: str, items_deleted: int, latency_ms: float) -> None:
         """Логирует очистку коллекции Chroma"""
         self.set_stage("chroma")
         self._log(
@@ -287,7 +287,7 @@ class StructuredLogger:
             latency_ms=latency_ms
         )
     
-    def log_chroma_op(self, collection: str, operation: str, latency_ms: float, result_count: int = 0):
+    def log_chroma_op(self, collection: str, operation: str, latency_ms: float, result_count: int = 0) -> None:
         """Логирует операцию Chroma"""
         self.set_stage("chroma")
         self._log(
@@ -312,7 +312,7 @@ class StructuredLogger:
     # RAG PIPELINE CHECKPOINTS
     # ========================================================================
     
-    def log_rag_checkpoint_a(self, retrieved_chunks: list):
+    def log_rag_checkpoint_a(self, retrieved_chunks: list) -> None:
         """Логирует pre-rerank чанки"""
         self.set_stage("pre_rerank")
         
@@ -325,7 +325,7 @@ class StructuredLogger:
             retrieved_chunks=f"[{chunks_str}]"
         )
     
-    def log_rag_checkpoint_b(self, reranker: str, context_chars: int):
+    def log_rag_checkpoint_b(self, reranker: str, context_chars: int) -> None:
         """Логирует post-rerank этап"""
         self.set_stage("post_rerank")
         self._log(
@@ -335,7 +335,7 @@ class StructuredLogger:
             context_chars=context_chars
         )
     
-    def log_rag_checkpoint_c(self, prompt_chars: int, model: str, temperature: float):
+    def log_rag_checkpoint_c(self, prompt_chars: int, model: str, temperature: float) -> None:
         """Логирует LLM prompt этап"""
         self.set_stage("llm_prompt")
         self._log(
@@ -346,7 +346,7 @@ class StructuredLogger:
             temperature=temperature
         )
     
-    def log_rag_checkpoint_c_prompt_head(self, prompt_head: str):
+    def log_rag_checkpoint_c_prompt_head(self, prompt_head: str) -> None:
         """Логирует начало промпта (DEBUG)"""
         self.set_stage("llm_prompt")
         self._log(
@@ -359,8 +359,8 @@ class StructuredLogger:
     # LLM GENERATION
     # ========================================================================
     
-    def log_llm_generate(self, provider: str, model: str, prompt_chars: int, 
-                         latency_ms: float, response_chars: int):
+    def log_llm_generate(self, provider: str, model: str, prompt_chars: int,
+                         latency_ms: float, response_chars: int) -> None:
         """Логирует генерацию LLM"""
         self.set_stage("llm_generate")
         
@@ -393,7 +393,7 @@ class StructuredLogger:
             else:
                 self.stats['cpu_queries'] += 1
     
-    def log_llm_stream(self, provider: str, model: str, latency_ms: float):
+    def log_llm_stream(self, provider: str, model: str, latency_ms: float) -> None:
         """Логирует стриминг LLM"""
         self.set_stage("llm_generate")
         self._log(
@@ -413,7 +413,7 @@ class StructuredLogger:
                 latency_ms=latency_ms
             )
     
-    def log_openai_error(self, http_status: int, message: str):
+    def log_openai_error(self, http_status: int, message: str) -> None:
         """Логирует ошибки OpenAI API"""
         self.set_stage("llm_generate")
         self._log(
@@ -427,7 +427,7 @@ class StructuredLogger:
     # HTTP LEVEL
     # ========================================================================
     
-    def log_query_result(self, latency_ms: float, response_chars: int, prompt_prefix: str = ""):
+    def log_query_result(self, latency_ms: float, response_chars: int, prompt_prefix: str = "") -> None:
         """Логирует результат запроса"""
         self.set_stage("query")
         self._log(
@@ -438,7 +438,7 @@ class StructuredLogger:
             prompt_prefix=prompt_prefix[:50] if prompt_prefix else ""
         )
     
-    def log_http_response_large(self, body_chars: int, threshold_chars: int = 51200):
+    def log_http_response_large(self, body_chars: int, threshold_chars: int = 51200) -> None:
         """Логирует большие HTTP ответы"""
         self.set_stage("http")
         self._log(
@@ -452,8 +452,8 @@ class StructuredLogger:
     # EVALUATION BATCH
     # ========================================================================
     
-    def log_eval_batch_summary(self, questions: int, avg_latency_ms: float, 
-                                gpu_calls: int, cpu_calls: int, skipped_files: int):
+    def log_eval_batch_summary(self, questions: int, avg_latency_ms: float,
+                                gpu_calls: int, cpu_calls: int, skipped_files: int) -> None:
         """Логирует сводку по батчу оценки"""
         self.set_stage("eval")
         self._log(
@@ -480,4 +480,6 @@ def init_logger(model_tag: str = "llama3.2:3b") -> StructuredLogger:
 
 def get_logger() -> StructuredLogger:
     """Возвращает глобальный логгер"""
+    if logger is None:
+        raise RuntimeError("logger not initialized: call init_logger() first")
     return logger
