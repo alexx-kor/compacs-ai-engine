@@ -54,7 +54,7 @@ class Config:
 
     doc_files: list[tuple[str, str]] = field(default_factory=list)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.ch_password:
             raise ValueError("CLICKHOUSE_PASSWORD env variable is required")
 

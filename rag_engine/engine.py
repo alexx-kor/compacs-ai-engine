@@ -1,13 +1,12 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-RAG Engine - FIXED VERSION
-"""
+"""RAG orchestrator: retrieve from ClickHouse, rerank, route prompt, generate via Ollama."""
 
-import time
-import json
 import hashlib
-from typing import Dict, List, Tuple
+import json
+import logging
+import time
+
 import ollama
 
 from config import config
@@ -16,12 +15,14 @@ from core.embeddings import embedder
 from core.reranker import reranker
 from router.smart_router import select_prompt
 
+log = logging.getLogger(__name__)
+
 
 class RAGEngine:
     """RAG движок с автоматическим выбором промпта"""
     
     @staticmethod
-    def ask(question: str) -> Dict:
+    def ask(question: str) -> dict:
         t_start = time.time()
         
         # Кэш

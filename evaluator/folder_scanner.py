@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 
 class FolderScanner:
-    def __init__(self, root_path: str):
+    def __init__(self, root_path: str) -> None:
         self.root_path = Path(root_path)
 
     def scan(self) -> list[dict]:

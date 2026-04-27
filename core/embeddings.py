@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 class EmbeddingGenerator:
     """Generate embeddings via Ollama model."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.model = config.embed_model
         self.batch_size = config.batch_size
         self.max_length = config.max_text_length

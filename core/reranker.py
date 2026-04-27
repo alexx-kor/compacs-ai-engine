@@ -1,16 +1,21 @@
-﻿import re
-from typing import List, Tuple
+"""Lexical reranker blending cosine similarity and token overlap."""
+
+import logging
+import re
+
 from config import config
+
+log = logging.getLogger(__name__)
 
 
 class Reranker:
     @staticmethod
-    def rerank(question: str, results: List[tuple]) -> List[tuple]:
+    def rerank(question: str, results: list[tuple]) -> list[tuple]:
         if not results:
             return results
-        
+
         q_words = set(re.findall(r'\b\w{4,}\b', question.lower()))
-        
+
         scored = []
         for result in results:
             chunk, source, page, distance = result
@@ -19,7 +24,7 @@ class Reranker:
             similarity = 1 - distance
             final_score = similarity * 0.6 + overlap * 0.4
             scored.append((final_score, result))
-        
+
         scored.sort(key=lambda x: x[0], reverse=True)
         return [r for _, r in scored[:config.rerank_top_k]]
 

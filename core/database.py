@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import Any
 
 import clickhouse_connect
 from config import config
@@ -12,12 +13,12 @@ log = logging.getLogger(__name__)
 class DatabaseManager:
     """Manage ClickHouse operations and in-memory cache."""
 
-    def __init__(self):
-        self._client = None
+    def __init__(self) -> None:
+        self._client: Any | None = None
         self._cache: dict[str, str] = {}
         self._cache_time: dict[str, float] = {}
 
-    def get_client(self):
+    def get_client(self) -> Any:
         """Return lazily initialized ClickHouse client."""
         if self._client is None:
             assert config.ch_password is not None, "CLICKHOUSE_PASSWORD must be set"
@@ -32,7 +33,7 @@ class DatabaseManager:
             log.info("connected to clickhouse host=%s secure=%s", config.ch_host, config.ch_secure)
         return self._client
 
-    def init_database(self, force_recreate: bool = False):
+    def init_database(self, force_recreate: bool = False) -> None:
         """Initialize chunk table in ClickHouse.
 
         Args:

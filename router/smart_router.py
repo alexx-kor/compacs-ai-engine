@@ -160,7 +160,7 @@ class SmartPromptRouter:
         return len(FEW_SHOT_EXAMPLES)
 
     @staticmethod
-    def reload_examples():
+    def reload_examples() -> int:
         global FEW_SHOT_EXAMPLES
         FEW_SHOT_EXAMPLES = FewShotLoader.load_examples()
         return len(FEW_SHOT_EXAMPLES)

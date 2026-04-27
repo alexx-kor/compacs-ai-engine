@@ -18,10 +18,10 @@ DEFAULT_INSTRUCTIONS_DIR = ROOT_DIR / "instructions"
 os.environ.setdefault("DOCS_FOLDER", str(DEFAULT_INSTRUCTIONS_DIR))
 sys.path.insert(0, str(ROOT_DIR))
 
-from config import config
-from core.database import db
-from core.document_processor import doc_processor
-from core.embeddings import embedder
+from config import config  # noqa: E402
+from core.database import db  # noqa: E402
+from core.document_processor import doc_processor  # noqa: E402
+from core.embeddings import embedder  # noqa: E402
 
 log = logging.getLogger(__name__)
 

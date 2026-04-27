@@ -4,7 +4,11 @@
 Token counter for OpenAI models
 """
 
+import logging
+
 import tiktoken
+
+log = logging.getLogger(__name__)
 
 
 def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
