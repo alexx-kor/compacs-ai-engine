@@ -49,9 +49,9 @@ SYNTHESIS_SYSTEM_PROMPT = (
 os.environ.setdefault("DOCS_FOLDER", str(DEFAULT_INSTRUCTIONS_DIR))
 sys.path.insert(0, str(ROOT_DIR))
 
-from config import config
-from core.document_processor import doc_processor
-from core.embeddings import embedder
+from config import config  # noqa: E402
+from core.document_processor import doc_processor  # noqa: E402
+from core.embeddings import embedder  # noqa: E402
 
 log = logging.getLogger(__name__)
 _ollama_client: ollama.Client | None = None
@@ -409,6 +409,7 @@ def ensure_clickhouse() -> tuple[Any | None, bool]:
     if not is_clickhouse_http_alive(config.ch_host, port, config.ch_secure):
         log.warning("[clickhouse] ping failed host=%s port=%s", config.ch_host, port)
     try:
+        assert config.ch_password is not None, "CLICKHOUSE_PASSWORD must be set"
         configured_client = create_clickhouse_client(config.ch_host, config.ch_user, config.ch_password, config.ch_secure)
         if can_query_clickhouse(configured_client):
             log.info("[clickhouse] connected to configured endpoint")

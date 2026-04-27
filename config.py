@@ -15,7 +15,7 @@ class Config:
     # ClickHouse
     ch_host: str = os.getenv('CLICKHOUSE_HOST', 'ug1o26imbr.eu-central-1.aws.clickhouse.cloud')
     ch_user: str = os.getenv('CLICKHOUSE_USER', 'default')
-    ch_password: str = os.getenv('CLICKHOUSE_PASSWORD', '~MlK_g7KdbqYH')
+    ch_password: str | None = os.getenv('CLICKHOUSE_PASSWORD')
     ch_secure: bool = os.getenv('CLICKHOUSE_SECURE', 'true').lower() == 'true'
 
     # Ollama
@@ -55,6 +55,9 @@ class Config:
     doc_files: list[tuple[str, str]] = field(default_factory=list)
 
     def __post_init__(self):
+        if not self.ch_password:
+            raise ValueError("CLICKHOUSE_PASSWORD env variable is required")
+
         if os.path.exists(self.docs_folder):
             for root, dirs, files in os.walk(self.docs_folder):
                 for file in files:

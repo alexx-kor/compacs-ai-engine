@@ -20,6 +20,7 @@ class DatabaseManager:
     def get_client(self):
         """Return lazily initialized ClickHouse client."""
         if self._client is None:
+            assert config.ch_password is not None, "CLICKHOUSE_PASSWORD must be set"
             self._client = clickhouse_connect.get_client(
                 host=config.ch_host,
                 username=config.ch_user,
