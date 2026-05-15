@@ -178,6 +178,53 @@ python -m pip install -e ".[dev]"
 
 ---
 
+## Quick Start (офлайн без ClickHouse)
+
+Простейший способ протестировать систему без настройки ClickHouse Cloud:
+
+```bash
+# Режим только JSON (без ClickHouse Cloud)
+export STORAGE_BACKEND="json"  # Linux/macOS
+# или
+$env:STORAGE_BACKEND = "json"  # Windows PowerShell
+
+# Индексация документов из instructions/raw/
+uv run app ingest --source instructions/raw/
+
+# Первый осмысленный RAG-запрос
+uv run app query "How do I configure the system?"
+
+# Проверка что данные проиндексированы
+uv run app query "test" | jq '.sources | length'  # должно быть > 0
+```
+
+**Полностью офлайн режим (без OpenAI):**
+
+```bash
+# Дополнительно отключить OpenAI
+export LLM_PROVIDER="ollama"
+export EMBEDDING_PROVIDER="ollama"
+
+# Убедиться что Ollama запущен с нужными моделями
+ollama serve &
+ollama pull nomic-embed-text
+ollama pull llama3.2:3b
+
+# Теперь все локально
+uv run app query "your question"
+```
+
+> **Результат:** система работает полностью локально без внешних API и облачных сервисов. Подходит для разработки, тестирования и офлайн-сред.
+
+**Windows PowerShell (без `jq`):** после ingest проверьте, что в ответе есть `sources`:
+
+```powershell
+python -m app query "test"
+# в JSON поле "sources" не должно быть пустым []
+```
+
+---
+
 ## Примеры запуска
 
 ### 1. Основной путь (Unified RAG)
