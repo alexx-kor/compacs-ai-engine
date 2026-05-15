@@ -1,5 +1,33 @@
 # MCP Layer: Build & Run Guide
 
+## Unified RAG System
+
+Production-ready RAG with hybrid storage (ClickHouse + JSON), OpenAI → Ollama fallback, and dual HTTP APIs.
+
+```bash
+uv sync --group dev
+cp .env.rag.example .env.rag
+cp .env.clickhouse.example .env.clickhouse
+
+uv run app ingest --source instructions/raw/
+uv run app query "How do I configure ClickHouse?"
+uv run app serve-api    # :8080 stable
+uv run app serve-dev    # :8090 debug
+```
+
+| Variable | Purpose |
+|----------|---------|
+| `STORAGE_BACKEND` | `clickhouse`, `json`, or `auto` |
+| `LLM_PROVIDER` | `openai`, `ollama`, or `auto` |
+| `OPENAI_API_KEY` | OpenAI (`.env.rag`) |
+| `CLICKHOUSE_PASSWORD` | ClickHouse (`.env.clickhouse`) |
+
+Data layout: `instructions/raw/`, `instructions/graph/`, `instructions/golden/`, `instructions/few_shot/` (artifacts under `data/`, gitignored).
+
+Tests: `uv run pytest` or `python -m pytest tests`
+
+---
+
 Короткая инструкция по сборке окружения и запуску пайплайнов.
 
 ## 0) Установка uv

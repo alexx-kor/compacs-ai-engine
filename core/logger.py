@@ -4,13 +4,31 @@
 Структурированное логирование для RAG системы
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def setup_logging(level: int = logging.INFO) -> logging.Logger:
+    """Configure root logging for CLI and HTTP entry points."""
+    root = logging.getLogger()
+    if not root.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(levelname)s %(name)s %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+        root.addHandler(handler)
+    root.setLevel(level)
+    return root
 
 
 class StructuredLogger:

@@ -3,10 +3,10 @@
 import logging
 
 from core.database import DatabaseManager
-from core.embeddings import EmbeddingGenerator
+from core.embeddings import EmbeddingChain, EmbeddingGenerator
 from core.document_processor import DocumentProcessor
 from core.reranker import Reranker
 
 log = logging.getLogger(__name__)
 
-__all__ = ["DatabaseManager", "EmbeddingGenerator", "DocumentProcessor", "Reranker"]
+__all__ = ["DatabaseManager", "EmbeddingChain", "EmbeddingGenerator", "DocumentProcessor", "Reranker"]

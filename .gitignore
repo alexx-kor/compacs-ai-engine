@@ -29,6 +29,8 @@ htmlcov/
 # Environment/local config
 .env
 .env.*
+!.env.*.example
+data/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -58,23 +60,7 @@ answers_*/
 *secret*.txt
 *api*key*.txt
 
-# ClickHouse Bot (clickhouse-bot-develop)
-clickhouse-bot-develop/.env
-clickhouse-bot-develop/.env.*
-!clickhouse-bot-develop/.env.example
-clickhouse-bot-develop/config.json
-clickhouse-bot-develop/settings.json
-clickhouse-bot-develop/*.key
-clickhouse-bot-develop/*.pem
-clickhouse-bot-develop/*.crt
-clickhouse-bot-develop/secrets/
-clickhouse-bot-develop/logs/
-clickhouse-bot-develop/tmp/
-clickhouse-bot-develop/__pycache__/
-clickhouse-bot-develop/node_modules/
-clickhouse-bot-develop/*.stackdump
-clickhouse-bot-develop/data/
-clickhouse-bot-develop/doc-2.0-sources/
-clickhouse-bot-develop/*.sqlite
-clickhouse-bot-develop/*.sqlite3
-clickhouse-bot-develop/*.db
+# Runtime vector stores and usage tracking
+data/vectors/
+data/vectors_test/
+data/openai_usage.json
