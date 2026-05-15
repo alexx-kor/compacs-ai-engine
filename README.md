@@ -82,8 +82,11 @@ Python-система для индексации документов, отве
 # Клонирование и переход в каталог проекта
 cd mcp-layer
 
-# Синхронизация окружения через uv
+# Основной путь (если uv установлен)
 uv sync --group dev
+
+# Альтернатива без uv
+python -m pip install -e ".[dev]"
 
 # Шаблоны секретов (реальные файлы не коммитить)
 cp .env.rag.example .env.rag
@@ -96,13 +99,9 @@ ollama pull llama3.2:3b
 ollama serve
 ```
 
-### Альтернатива без uv
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-> Legacy-скрипты (`load_graph_chunks.py`, `baseline/`) используют то же окружение; отдельный `requirements.txt` — устаревший путь, предпочтителен `uv sync`.
+> Команды CLI: **`python -m app`** (работает всегда после `pip install`). При установленном uv: **`uv run app`**.
+>
+> Legacy-скрипты (`load_graph_chunks.py`, `baseline/`) используют то же окружение; отдельный `requirements.txt` — устаревший путь.
 
 ---
 
@@ -182,46 +181,85 @@ python -m pip install -e ".[dev]"
 
 Простейший способ протестировать систему без настройки ClickHouse Cloud:
 
+### Подготовка тестовых данных
+
+```bash
+# Windows PowerShell - подготовить документы для индексации
+Copy-Item "instructions\*.extract.txt" "instructions\raw\" -ErrorAction SilentlyContinue
+Get-ChildItem instructions\raw\*.extract.txt | Rename-Item -NewName { $_.Name -replace '\.extract\.txt$','.txt' }
+
+# Linux/macOS
+cp instructions/*.extract.txt instructions/raw/ 2>/dev/null || true
+cd instructions/raw && for f in *.extract.txt; do mv "$f" "${f%.extract.txt}.txt" 2>/dev/null || true; done && cd ../..
+```
+
+### Базовый режим (JSON + OpenAI)
+
 ```bash
 # Режим только JSON (без ClickHouse Cloud)
 export STORAGE_BACKEND="json"  # Linux/macOS
 # или
 $env:STORAGE_BACKEND = "json"  # Windows PowerShell
 
-# Индексация документов из instructions/raw/
-uv run app ingest --source instructions/raw/
+# Индексация документов
+python -m app ingest --source instructions/raw/ --force-reload
 
-# Первый осмысленный RAG-запрос
-uv run app query "How do I configure the system?"
+# Первый осмысленный RAG-запрос (на языке документов)
+python -m app query "руководство оператора"
 
-# Проверка что данные проиндексированы
-uv run app query "test" | jq '.sources | length'  # должно быть > 0
+# Проверка что данные проиндексированы (Windows PowerShell)
+python -m app query "test" | python -c "import json,sys; print(f'Найдено источников: {len(json.load(sys.stdin)[\"sources\"])}')"
 ```
 
-**Полностью офлайн режим (без OpenAI):**
+### Полностью офлайн режим (без OpenAI)
 
 ```bash
 # Дополнительно отключить OpenAI
-export LLM_PROVIDER="ollama"
+export LLM_PROVIDER="ollama"           # Linux/macOS
 export EMBEDDING_PROVIDER="ollama"
+# или
+$env:LLM_PROVIDER = "ollama"           # Windows PowerShell
+$env:EMBEDDING_PROVIDER = "ollama"
 
 # Убедиться что Ollama запущен с нужными моделями
 ollama serve &
 ollama pull nomic-embed-text
 ollama pull llama3.2:3b
 
-# Теперь все локально
-uv run app query "your question"
+# Переиндексация с Ollama embeddings
+python -m app ingest --source instructions/raw/ --force-reload
+
+# Локальный RAG-запрос
+python -m app query "конфигурация системы"
+```
+
+### Примеры вопросов
+
+Вопросы должны соответствовать содержанию ваших документов:
+
+```bash
+# Если документы на русском
+python -m app query "руководство оператора"
+python -m app query "настройка системы"
+python -m app query "параметры конфигурации"
+
+# Если документы на английском
+python -m app query "installation guide"
+python -m app query "configuration parameters"
+python -m app query "operator manual"
 ```
 
 > **Результат:** система работает полностью локально без внешних API и облачных сервисов. Подходит для разработки, тестирования и офлайн-сред.
 
-**Windows PowerShell (без `jq`):** после ingest проверьте, что в ответе есть `sources`:
+> **Примечание:** Если `instructions/raw/` пуста, сначала выполните шаг «Подготовка тестовых данных». При наличии собственных документов — поместите `.txt`, `.md`, `.rst` или `.pdf` файлы в `instructions/raw/`.
 
-```powershell
-python -m app query "test"
-# в JSON поле "sources" не должно быть пустым []
-```
+---
+
+## Важные замечания
+
+- **Язык вопросов**: используйте тот же язык, что и в проиндексированных документах
+- **Формат файлов**: поддерживаются `.txt`, `.md`, `.rst`, `.pdf` в `instructions/raw/`
+- **uv vs python**: если uv не установлен, используйте `python -m app` вместо `uv run app`
 
 ---
 
@@ -231,22 +269,23 @@ python -m app query "test"
 
 ```bash
 # Индексация документов из instructions/raw/
-uv run app ingest --source instructions/raw/
+python -m app ingest --source instructions/raw/
+# или: uv run app ingest --source instructions/raw/
 
 # Пересоздать хранилище и загрузить заново
-uv run app ingest --source instructions/raw/ --force-reload
+python -m app ingest --source instructions/raw/ --force-reload
 
 # Запрос через CLI
-uv run app query "Как настроить ClickHouse для RAG?"
+python -m app query "Как настроить ClickHouse для RAG?"
 
 # HTTP API — стабильный (:8080)
-uv run app serve-api
+python -m app serve-api
 
 # HTTP API — отладочный (:8090)
-uv run app serve-dev
+python -m app serve-dev
 
 # Оба API одновременно
-uv run app serve-all
+python -m app serve-all
 
 # Пример HTTP-запроса (стабильный API)
 curl -X POST http://localhost:8080/v1/query \
@@ -257,13 +296,14 @@ curl -X POST http://localhost:8080/v1/query \
 curl http://localhost:8080/health
 
 # Миграция: экспорт из ClickHouse в JSONL
-uv run app migrate export --from clickhouse --to jsonl --output data/chunks.jsonl
+python -m app migrate export --from clickhouse --to jsonl --output data/chunks.jsonl
 
 # Миграция: импорт JSONL в JSON-хранилище
-uv run app migrate import --from jsonl --to json --input data/chunks.jsonl
+python -m app migrate import --from jsonl --to json --input data/chunks.jsonl
 
 # Тесты
-uv run pytest
+python -m pytest
+# или: uv run pytest
 ```
 
 | Команда `app` | Описание |
@@ -280,23 +320,24 @@ uv run pytest
 
 ```bash
 # Загрузка instructions/*.txt в ClickHouse (legacy)
-uv run python load_graph_chunks.py
+python load_graph_chunks.py
+# или: uv run python load_graph_chunks.py
 
 # Без пересоздания таблицы
-uv run python load_graph_chunks.py --no-force-recreate
+python load_graph_chunks.py --no-force-recreate
 
 # Baseline: генерация ответов
-uv run python baseline/run_gpu_baseline.py
+python baseline/run_gpu_baseline.py
 # Результат: baseline/rag_answers_gpu.json
 
 # Полная оценка качества
-uv run python full_evaluation.py
+python full_evaluation.py
 
 # LLM-судья (сравнение прогонов)
-uv run python llm_evaluate.py --main baseline/rag_answers_gpu.json --hypothesis <other.json>
+python llm_evaluate.py --main baseline/rag_answers_gpu.json --hypothesis <other.json>
 
 # Сравнение CSV/JSON
-uv run python compare_results.py --old baseline/old.json --new baseline/new.json
+python compare_results.py --old baseline/old.json --new baseline/new.json
 ```
 
 ---
@@ -404,7 +445,7 @@ flowchart LR
 
 ```bash
 # Проверка CLI-запроса (полный JSON-ответ)
-uv run app query "тестовый вопрос"
+python -m app query "тестовый вопрос"
 
 # Статус хранилища и лимитов OpenAI (dev API, порт 8090)
 curl http://localhost:8090/metrics
@@ -418,20 +459,21 @@ curl -X POST http://localhost:8090/debug/query \
 curl http://localhost:8080/health
 
 # Юнит- и интеграционные тесты
-uv run pytest tests/unit/ -v
-uv run pytest tests/integration/ -v
+python -m pytest tests/unit/ -v
+python -m pytest tests/integration/ -v
 
 # Линтинг и типы (dev-зависимости)
-uv run ruff check .
-uv run mypy .
+python -m ruff check .
+python -m mypy .
 ```
 
 | Симптом | Действие |
 |---------|----------|
 | ClickHouse недоступен | Проверить `.env.clickhouse`, `CLICKHOUSE_PASSWORD`; при `STORAGE_BACKEND=auto` система перейдёт на JSON |
 | OpenAI rate limit / budget | Смотреть `data/openai_usage.json` и `/metrics`; сработает fallback на Ollama |
-| Пустой ingest | Убедиться, что файлы в `instructions/raw/` и длина текста ≥ `MIN_CHUNK_SIZE` (100) |
-| `uv` не найден | Установить uv (см. [документацию](https://docs.astral.sh/uv/)) или `pip install -e ".[dev]"` |
+| Пустой ingest | Выполнить «Подготовка тестовых данных» в Quick Start; файлы в `instructions/raw/`, длина текста ≥ `MIN_CHUNK_SIZE` (100) |
+| `NOT FOUND` при query | Вопрос на том же языке, что документы; после ingest проверить `sources` в JSON-ответе |
+| `uv` не найден | Использовать `python -m app` и `python -m pip install -e ".[dev]"` |
 
 ---
 
@@ -440,11 +482,16 @@ uv run mypy .
 См. `AGENTS_PYTHON.md` — правила кода для Python-модулей репозитория.
 
 ```bash
+# uv (если установлен)
 uv sync --group dev
-uv run pytest
-uv run ruff check .
-uv run ruff format .
-uv run mypy .
+
+# или pip
+python -m pip install -e ".[dev]"
+
+python -m pytest
+python -m ruff check .
+python -m ruff format .
+python -m mypy .
 ```
 
 ---
