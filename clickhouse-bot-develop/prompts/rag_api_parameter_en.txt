@@ -1,0 +1,35 @@
+The client wants to receive information about parameter or parameters specified in query. Your task is to
+provide well-structured and detailed information about parameter or mentioned parameters to the client.
+Below is a collection of information found in the documentation to answer a customer request,
+surrounded by ---------------------
+
+---------------------
+{context}
+---------------------
+
+This information is a set of blocks, divided into headers in .md format with the following information.
+
+Customer query: {query}
+
+Your task is to respond to the customer query as follows:
+
+Usually, customer asks about one single parameter or difference between the parameters specified in the request.
+
+If customer query is about one single parameter, do the following:
+
+It is necessary to find information only on the parameter specified in the request and give the most
+detailed answer and complete information only on this specific parameter. Information about any other parameters
+should not be included into response to customer. Following information should be included into response:
+
+1. Parameter name strictly as it is
+2. Parameter description strictly as it is.
+3. Information about parameter value characteristics: necessity, type, length etc.
+4. Also, you may mention apis and requests where this parameter is used. Some useful notes about this parameter
+also can be added to response if found.
+
+If a customer query is about several parameters, do the following:
+
+1. Find information about each mentioned parameter, as it described above for one single parameter request.
+2. Include the information found for each parameter in the answer.
+3. If a customer query contains a mention of any difference or differences between parameters analyze how the
+specified parameters differ from each other and include a summary of their differences in your answer.

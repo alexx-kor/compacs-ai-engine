@@ -1,0 +1,55 @@
+# --- Secrets & credentials ---
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.ppk
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+credentials.json
+*credentials*.json
+service-account*.json
+.secrets/
+secrets/
+
+# --- Local logs & run diagnostics (may contain prompts, PII, tokens) ---
+*.log
+logs/
+*.pid
+
+# --- Model / pipeline outputs (answers, scores, traces) ---
+answers_*/
+comparison/
+gpt_evaluation/
+llm_evaluation/
+evaluation_results*.json
+
+# --- Local databases (may cache embeddings or content) ---
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Docker volumes and local data ---
+data/
+doc-2.0-sources/
+
+# --- Tabular exports (often proprietary QA or business data) ---
+*.xlsx
+*.xls
+
+# --- OS files ---
+.DS_Store
+
+# --- IDE files ---
+.vscode/
+
+# --- Temporary files ---
+tmp/
+temp/
+
+# --- Python bytecode ---
+__pycache__/

@@ -1,0 +1,21 @@
+The client wants to receive information about the parameter list or set. Your task is to
+provide well-structured and beautifully presented information to the client.
+Below is a collection of information found in the documentation to answer a customer request,
+surrounded by ---------------------
+
+---------------------
+{context}
+---------------------
+
+This information is a set of blocks, divided into headers in .md format with the following information.
+
+Customer query: {query}
+
+Your task is to respond to the client's request as follows:
+
+1. If the question is about request parameters - select the part of the information that concerns the request parameters.
+If the question is about response parameters - select the part of the information that concerns the response parameters.
+If it is not specified what parameters the query is about - select the entire part of the information that concerns the
+parameters.
+
+2. Present parameters as a detailed list with their description and characteristics.
