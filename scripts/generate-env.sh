@@ -44,6 +44,9 @@ VECTORDB_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
 JWT_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
 JWT_REFRESH_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
 
+# Compacs RAG API key (LibreChat custom endpoint + compacs-rag auth)
+COMPACS_API_KEY=${COMPACS_API_KEY:-$(openssl rand -hex 24)}
+
 # # Prompt for user email or use default
 # read -p "Enter initial Langfuse user email (default: admin@example.com): " USER_EMAIL
 # USER_EMAIL=${USER_EMAIL:-admin@example.com}
@@ -162,6 +165,7 @@ VECTORDB_PASSWORD=${VECTORDB_PASSWORD}
 # ============================================
 JWT_SECRET=${JWT_SECRET}
 JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+COMPACS_API_KEY=${COMPACS_API_KEY}
 
 # LibreChat Initial User
 # Note: These are the same as the Langfuse credentials by default

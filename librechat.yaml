@@ -43,6 +43,19 @@ endpoints:
   google:
     fetch: true
 
+  custom:
+    - name: "Compacs"
+      apiKey: "${COMPACS_API_KEY}"
+      baseURL: "http://compacs-rag:8080/v1"
+      models:
+        default:
+          - "compacs-rag"
+        fetch: false
+      titleConvo: true
+      titleModel: "compacs-rag"
+      modelDisplayLabel: "Compacs RAG"
+      dropParams: ["user", "frequency_penalty", "presence_penalty"]
+
 mcpSettings:
   allowedDomains:
     - "http://clickhouse-mcp:8000"

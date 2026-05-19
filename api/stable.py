@@ -5,13 +5,34 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from api.openai_compat import router as openai_router
 from config import config
 from core.database import db
+from core.embedding_alignment import configure_embeddings_for_index
+from core.embeddings.chain import EmbeddingChain
 from rag_service import rag_service
 
 app_stable = FastAPI(title="RAG API", version="1.0")
+
+
+@app_stable.on_event("startup")
+def align_embeddings_on_startup() -> None:
+    """Match query embeddings to index before first request (768 Ollama vs 1536 OpenAI)."""
+    if db.get_chunk_count() == 0:
+        return
+    configure_embeddings_for_index(config.local_vector_store_dir)
+    rag_service._embeddings = EmbeddingChain(config)
+app_stable.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app_stable.include_router(openai_router)
 
 
 class QueryRequest(BaseModel):

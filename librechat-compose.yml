@@ -13,6 +13,8 @@ services:
         condition: service_healthy
       rag_api:
         condition: service_started
+      compacs-rag:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3080/ || exit 1"]
       interval: 10s
@@ -102,6 +104,39 @@ services:
       - librechat_vectordb_data:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:5433:5432"  # Different port than Langfuse's postgres (5432)
+
+  # Compacs instruction RAG (pre-indexed knowledge base, OpenAI-compatible API)
+  compacs-rag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env.rag
+    environment:
+      - STORAGE_BACKEND=${COMPACS_STORAGE_BACKEND:-json}
+      - EMBEDDING_PROVIDER=ollama
+      - EMBEDDING_FALLBACK_ENABLED=false
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - COMPACS_API_KEY=${COMPACS_API_KEY:-}
+    volumes:
+      - type: bind
+        source: ./data/vectors
+        target: /app/data/vectors
+      - type: bind
+        source: ./.env.rag
+        target: /app/.env.rag
+        read_only: true
+    ports:
+      - "127.0.0.1:${COMPACS_RAG_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # RAG API service for file uploads and retrieval
   rag_api:

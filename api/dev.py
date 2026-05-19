@@ -48,7 +48,7 @@ async def trigger_ingest(request: IngestRequest) -> dict[str, Any]:
         return {"inserted": 0, "report": report.__dict__}
     texts = [chunk["chunk"] for chunk in chunks]
     embeddings = EmbeddingChain(config).embed(texts)
-    for chunk, embedding in zip(chunks, embeddings, strict=True):
+    for chunk, embedding in zip(chunks, embeddings):
         chunk["embedding"] = embedding
     db.insert_batch(chunks)
     return {"inserted": len(chunks), "report": report.__dict__}

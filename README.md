@@ -496,6 +496,71 @@ python -m mypy .
 
 ---
 
+## Интеграция с LibreChat
+
+Compacs RAG подключается к LibreChat как **custom endpoint** с OpenAI-совместимым API (`/v1/chat/completions`). Весь пайплайн (гибридный поиск, rerank, промпты, LLM) выполняется на стороне `rag_service` — LibreChat только отображает чат.
+
+### Локально (без Docker)
+
+```bash
+# 1. Индекс и API
+python load_graph_chunks.py --force-recreate
+python -m app serve-api   # :8080
+
+# 2. В .env.rag (опционально, для защиты API)
+COMPACS_API_KEY=your-secret-key
+COMPACS_MODELS=compacs-rag
+```
+
+В LibreChat (`librechat.yaml`) уже добавлен endpoint **Compacs** с `baseURL: http://compacs-rag:8080/v1` для Docker. Для локального LibreChat на хосте используйте:
+
+```yaml
+endpoints:
+  custom:
+    - name: "Compacs"
+      apiKey: "${COMPACS_API_KEY}"
+      baseURL: "http://host.docker.internal:8080/v1"   # LibreChat в Docker
+      # baseURL: "http://127.0.0.1:8080/v1"            # LibreChat на хосте
+      models:
+        default: ["compacs-rag"]
+        fetch: false
+      modelDisplayLabel: "Compacs RAG"
+```
+
+В UI выберите модель **compacs-rag** (endpoint Compacs) и задавайте вопросы по проиндексированным инструкциям.
+
+### Полный стек Docker
+
+```bash
+# Проиндексировать на хосте (нужны data/vectors/chunks.json)
+python load_graph_chunks.py --force-recreate
+
+# Поднять LibreChat + Compacs RAG + MCP
+docker compose up -d
+
+# LibreChat: http://localhost:3080
+# Compacs API health: curl http://127.0.0.1:8080/health
+```
+
+Сервис `compacs-rag` в `librechat-compose.yml` монтирует `data/vectors` и `.env.rag`, обращается к Ollama через `host.docker.internal:11434`.
+
+| Переменная | Описание |
+|------------|----------|
+| `COMPACS_API_KEY` | Bearer-токен для `/v1/*` (пусто = без авторизации) |
+| `COMPACS_MODELS` | ID моделей через запятую (по умолчанию `compacs-rag`) |
+| `COMPACS_RAG_PORT` | Порт на хосте (по умолчанию `8080`) |
+
+### HTTP API (OpenAI-совместимый)
+
+| Endpoint | Описание |
+|----------|----------|
+| `POST /v1/chat/completions` | RAG-ответ (stream и non-stream) |
+| `GET /v1/models` | Список моделей для LibreChat |
+| `POST /v1/query` | Нативный RAG JSON (как раньше) |
+| `GET /health` | Статус сервиса |
+
+---
+
 ## Инфраструктура (Docker)
 
 Compose-файлы в корне репозитория поднимают Langfuse, ClickHouse MCP и LibreChat — отдельно от Unified RAG API:
@@ -505,6 +570,6 @@ Compose-файлы в корне репозитория поднимают Langf
 | `docker-compose.yml` | Общий include |
 | `langfuse-compose.yml` | Langfuse + ClickHouse |
 | `clickhouse-mcp-compose.yml` | ClickHouse MCP |
-| `librechat-compose.yml` | LibreChat |
+| `librechat-compose.yml` | LibreChat + **compacs-rag** + rag_api |
 
 Скрипты окружения: `scripts/generate-env.sh`, `scripts/prepare-demo.sh`.

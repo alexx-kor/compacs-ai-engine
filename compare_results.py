@@ -68,8 +68,15 @@ def load_new_results(path_pattern: str) -> list[dict[str, Any]] | None:
     log.info("loading new results from=%s", resolved_path)
     with resolved_path.open("r", encoding="utf-8") as file_handle:
         data = json.load(file_handle)
-    log.info("new records loaded=%s", len(data))
-    return data
+    if isinstance(data, dict) and isinstance(data.get("results"), list):
+        records = data["results"]
+    elif isinstance(data, list):
+        records = data
+    else:
+        log.error("unsupported new results format: expected list or object with 'results'")
+        return None
+    log.info("new records loaded=%s", len(records))
+    return records
 
 
 def compare_scores(old_df: pd.DataFrame, new_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -86,7 +93,10 @@ def compare_scores(old_df: pd.DataFrame, new_data: list[dict[str, Any]]) -> list
         question_id = item.get("id")
         if question_id:
             new_scores[question_id] = {
-                "score": item.get("score", item.get("total_score", 0)),
+                "score": item.get(
+                    "final_score",
+                    item.get("score", item.get("total_score", 0)),
+                ),
                 "time": item.get("time", item.get("time_seconds", 0)),
                 "question": item.get("question", ""),
             }

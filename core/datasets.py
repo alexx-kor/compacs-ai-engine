@@ -8,10 +8,17 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from enum import StrEnum
+except ImportError:
+
+    class StrEnum(str, enum.Enum):
+        """Python 3.10 compatibility for enum.StrEnum (3.11+)."""
+
 log = logging.getLogger(__name__)
 
 
-class DatasetKind(enum.StrEnum):
+class DatasetKind(StrEnum):
     """Supported dataset categories under ``instructions/``."""
 
     RAW = "raw"
@@ -26,6 +33,15 @@ class GraphQAPair:
     topic_dir: Path
     questions_path: Path
     answer_path: Path
+
+
+@dataclass(frozen=True)
+class GoldenItem:
+    """Single golden evaluation record with reference answer."""
+
+    id: int
+    question: str
+    expected_answer: str
 
 
 @dataclass(frozen=True)
@@ -88,27 +104,71 @@ class DatasetScanner:
                 )
         return pairs
 
-    def load_golden_questions(self, golden_dir: Path | None = None) -> list[str]:
-        """Load questions from ``golden/questions.txt`` or ``golden_set.json``."""
-        root = golden_dir or (self._instructions_dir / "golden")
-        questions_path = root / "questions.txt"
-        if questions_path.exists():
-            return [
-                line.strip()
-                for line in questions_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-        golden_json = root / "golden_set.json"
-        if not golden_json.exists():
+    def _resolve_golden_json_path(self, golden_path: Path | None = None) -> Path:
+        if golden_path is None:
+            return self._instructions_dir / "golden" / "golden_set.json"
+        if golden_path.is_dir():
+            return golden_path / "golden_set.json"
+        return golden_path
+
+    def _load_golden_question_lines(self, golden_dir: Path) -> list[str]:
+        for name in ("questions.txt", "questions"):
+            questions_path = golden_dir / name
+            if questions_path.is_file():
+                return [
+                    line.strip()
+                    for line in questions_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+        return []
+
+    def load_golden_set(self, golden_path: Path | None = None) -> list[GoldenItem]:
+        """Load golden Q&A items from ``golden_set.json``."""
+        json_path = self._resolve_golden_json_path(golden_path)
+        if not json_path.exists():
+            log.warning("Golden set not found path=%s", json_path)
             return []
         try:
-            payload = json.loads(golden_json.read_text(encoding="utf-8"))
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as error:
-            log.warning("Invalid golden_set.json path=%s error=%s", golden_json, error)
+            log.warning("Invalid golden_set.json path=%s error=%s", json_path, error)
             return []
-        if isinstance(payload, list):
-            return [str(item.get("question", item)) for item in payload if item]
-        return []
+        if not isinstance(payload, list):
+            return []
+
+        items: list[GoldenItem] = []
+        for index, entry in enumerate(payload, start=1):
+            if not isinstance(entry, dict):
+                continue
+            question = str(entry.get("question", "")).strip()
+            if not question:
+                continue
+            raw_id = entry.get("id", index)
+            try:
+                item_id = int(raw_id)
+            except (TypeError, ValueError):
+                item_id = index
+            items.append(
+                GoldenItem(
+                    id=item_id,
+                    question=question,
+                    expected_answer=str(entry.get("expected_answer", "")).strip(),
+                )
+            )
+        return items
+
+    def load_golden_questions(self, golden_path: Path | None = None) -> list[str]:
+        """Load questions from ``golden_set.json`` or plain-text question lists."""
+        items = self.load_golden_set(golden_path)
+        if items:
+            return [item.question for item in items]
+
+        root = (
+            golden_path
+            if golden_path is not None and golden_path.is_dir()
+            else self._instructions_dir / "golden"
+        )
+        return self._load_golden_question_lines(root)
 
     def _scan_golden_files(self, golden_dir: Path) -> list[Path]:
         if not golden_dir.exists():

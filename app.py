@@ -69,7 +69,7 @@ def ingest(
         return
     texts = [str(chunk["chunk"]) for chunk in chunks]
     embeddings = EmbeddingChain(config).embed(texts)
-    for chunk, embedding in zip(chunks, embeddings, strict=True):
+    for chunk, embedding in zip(chunks, embeddings):
         chunk["embedding"] = embedding
     db.insert_batch(chunks)
     log.info(

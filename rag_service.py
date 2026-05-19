@@ -13,12 +13,27 @@ import numpy as np
 from config import config
 from core.cost_guard import CostGuard
 from core.database import db
+from core.embedding_alignment import configure_embeddings_for_index
 from core.embeddings.chain import EmbeddingChain
 from core.llm.chain import LLMChain
 from core.reranker import reranker
 from router.smart_router import select_prompt
 
 log = logging.getLogger(__name__)
+_embeddings_aligned = False
+
+
+def _ensure_embeddings_aligned() -> bool:
+    """Align embedding provider to index; return True if settings changed this call."""
+    global _embeddings_aligned
+    if _embeddings_aligned:
+        return False
+    if db.get_chunk_count() == 0:
+        _embeddings_aligned = True
+        return False
+    configure_embeddings_for_index(config.local_vector_store_dir)
+    _embeddings_aligned = True
+    return True
 
 
 class RagService:
@@ -36,6 +51,8 @@ class RagService:
 
     def ask(self, question: str) -> dict[str, Any]:
         """Answer a question using the configured storage and LLM chain."""
+        if _ensure_embeddings_aligned():
+            self._embeddings = EmbeddingChain(config)
         started_at = time.time()
         cache_key = hashlib.md5(question.encode()).hexdigest()
         cached = db.resolve_cache(cache_key)
@@ -45,7 +62,7 @@ class RagService:
             return payload
 
         query_embedding = np.asarray(self._embeddings.embed_cached(question), dtype=np.float64)
-        search_results = db.search(query_embedding.tolist())
+        search_results = db.search(query_embedding.tolist(), query_text=question)
         if not search_results:
             return {
                 "question": question,
@@ -60,7 +77,18 @@ class RagService:
         context_parts: list[str] = []
         sources: list[tuple[Any, ...]] = []
         for chunk, source, page, _distance in reranked[: config.rerank_top_k]:
-            context_parts.append("[%s, p.%s]\n%s" % (source, page, str(chunk)[:800]))
+            src = str(source)
+            if src.startswith("graph/"):
+                label = "GRAPH"
+            elif src.startswith("qa/"):
+                label = "QA"
+            elif src.startswith("defs/"):
+                label = "DEF"
+            elif src.startswith("hints/"):
+                label = "HINT"
+            else:
+                label = "DOC"
+            context_parts.append("[%s | %s, p.%s]\n%s" % (label, source, page, str(chunk)[:800]))
             sources.append((source, page))
         context = "\n\n".join(context_parts)
         system_prompt, _num_predict, temperature = select_prompt(question)

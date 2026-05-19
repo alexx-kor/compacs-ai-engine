@@ -1,4 +1,15 @@
-instructions/
+# User documents (do not commit proprietary corpora)
+instructions/**/*.txt
+instructions/**/*.pdf
+instructions/**/*.md
+instructions/**/*.rst
+instructions/**/*.extract.txt
+
+# Keep directory structure in git
+!instructions/raw/.gitkeep
+!instructions/graph/.gitkeep
+!instructions/golden/.gitkeep
+!instructions/few_shot/.gitkeep
 
 # Python cache/bytecode
 __pycache__/
@@ -30,7 +41,12 @@ htmlcov/
 .env
 .env.*
 !.env.*.example
+
+# Generated data and RAG artifacts
 data/
+
+# JSON vector store temp files (atomic write)
+*.json.tmp
 
 # Jupyter
 .ipynb_checkpoints/
@@ -44,6 +60,7 @@ data/
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Generated RAG/evaluation artifacts
 baseline/rag_answers_gpu.json
@@ -60,7 +77,8 @@ answers_*/
 *secret*.txt
 *api*key*.txt
 
-# Runtime vector stores and usage tracking
-data/vectors/
-data/vectors_test/
-data/openai_usage.json
+# LibreChat runtime config (secrets; use librechat.example.yaml)
+librechat.yaml
+
+# Legacy local document trees
+doc-2.0-sources/

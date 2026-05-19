@@ -78,7 +78,7 @@ Do NOT use numbers below 0 or above 100.
 """
     try:
         response = ollama.chat(
-            model=config.llm_model,
+            model=config.ollama_model,
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0.1, "num_predict": 300},
         )
@@ -119,7 +119,7 @@ Reply ONLY in JSON format:
 """
     try:
         response = ollama.chat(
-            model=config.llm_model,
+            model=config.ollama_model,
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0.1, "num_predict": 300},
         )

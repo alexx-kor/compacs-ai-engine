@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run full RAG evaluation with OpenAI answers and local metric scoring."""
+"""Run full RAG evaluation against the golden Q&A set and local metric scoring."""
 
 from __future__ import annotations
 
@@ -16,11 +16,38 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = Path(__file__).resolve().parent
+DEFAULT_VECTOR_STORE_DIR = ROOT_DIR / "data" / "vectors"
+DEFAULT_GOLDEN_PATH = ROOT_DIR / "instructions" / "golden" / "golden_set.json"
+
+
+def _apply_bootstrap_env() -> None:
+    """Use the same local JSON store as load_graph_chunks.py before config import."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--vector-store-dir",
+        default=str(DEFAULT_VECTOR_STORE_DIR),
+    )
+    bootstrap, _ = parser.parse_known_args()
+    os.environ["STORAGE_BACKEND"] = "json"
+    os.environ["LOCAL_VECTOR_STORE_DIR"] = str(Path(bootstrap.vector_store_dir).resolve())
+    # Default for fresh indexes; overridden in main() from chunks.json metadata.
+    os.environ.setdefault("EMBEDDING_PROVIDER", "ollama")
+
+
+_apply_bootstrap_env()
+sys.path.insert(0, str(ROOT_DIR))
 
 from config import config
 from core.database import db
+from core.datasets import DatasetScanner, GoldenItem
+from core.embedding_alignment import configure_embeddings_for_index
 from core.embeddings import embedder
+from core.evaluation_utils import (
+    is_not_found_answer,
+    is_unanswerable_expected,
+    tokenize_overlap,
+)
 from core.reranker import reranker
 from router.smart_router import select_prompt
 
@@ -63,6 +90,7 @@ class EvaluationResult:
 
     id: int
     question: str
+    expected_answer: str
     answer: str
     sources: list[tuple[str, int]]
     selected_prompt: str
@@ -76,11 +104,11 @@ class EvaluationResult:
 
 
 class RagWithGpt:
-    """Answer questions via ClickHouse retrieval and OpenAI completion."""
+    """Answer questions via local vector store retrieval and OpenAI completion."""
 
     def __init__(self) -> None:
         self.client: Any | None = None
-        self.gpt_model = "gpt-4o-mini"
+        self.gpt_model = config.openai_model
         if OPENAI_AVAILABLE:
             api_key = os.getenv("OPENAI_API_KEY")
             if api_key:
@@ -92,8 +120,8 @@ class RagWithGpt:
     def ask(self, question: str) -> dict[str, Any]:
         """Generate one answer using retrieval + GPT."""
         started_at = time.time()
-        query_embedding = list(embedder.generate_cached(question))
-        retrieved = db.search(query_embedding)
+        query_embedding = list(embedder.embed_cached(question))
+        retrieved = db.search(query_embedding, query_text=question)
         if not retrieved:
             return {
                 "question": question,
@@ -133,7 +161,7 @@ class RagWithGpt:
                         {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"},
                     ],
                     temperature=temperature,
-                    max_tokens=800,
+                    max_tokens=config.openai_max_tokens,
                 )
                 answer = response.choices[0].message.content
                 tokens = response.usage.total_tokens
@@ -160,10 +188,10 @@ class MetricsCalculator:
 
     @staticmethod
     def calculate_relevance(question: str, answer: str) -> float:
-        if not question or not answer or answer.startswith("ERROR") or answer == "NOT FOUND in documentation":
+        if not question or not answer or answer.startswith("ERROR") or is_not_found_answer(answer):
             return 0.0
-        question_words = set(re.findall(r"\b\w{4,}\b", question.lower()))
-        answer_words = set(re.findall(r"\b\w{4,}\b", answer.lower()))
+        question_words = tokenize_overlap(question)
+        answer_words = tokenize_overlap(answer)
         if not question_words:
             return 5.0
         return min(10.0, (len(question_words & answer_words) / len(question_words)) * 12)
@@ -179,10 +207,10 @@ class MetricsCalculator:
 
     @staticmethod
     def calculate_completeness(question: str, answer: str) -> float:
-        if not answer or answer.startswith("ERROR") or answer == "NOT FOUND in documentation":
+        if not answer or answer.startswith("ERROR") or is_not_found_answer(answer):
             return 0.0
-        question_words = set(re.findall(r"\b\w{4,}\b", question.lower()))
-        answer_words = set(re.findall(r"\b\w{4,}\b", answer.lower()))
+        question_words = tokenize_overlap(question)
+        answer_words = tokenize_overlap(answer)
         if not question_words:
             return 7.0
         return min(10.0, (len(question_words & answer_words) / len(question_words)) * 10)
@@ -225,12 +253,32 @@ class MetricsCalculator:
 
     @staticmethod
     def calculate_helpfulness(answer: str) -> float:
-        if not answer or answer.startswith("ERROR") or answer == "NOT FOUND in documentation":
+        if not answer or answer.startswith("ERROR") or is_not_found_answer(answer):
             return 0.0
         length_score = min(1.0, len(answer) / 500)
-        has_instructions = any(word in answer.lower() for word in ("как", "следуйте", "выполните", "используйте", "how to", "follow", "use"))
-        has_example = bool(re.search(r"(example|например|sample|пример)", answer.lower()))
-        score = length_score * 0.3 + (0.4 if has_instructions else 0.0) + (0.3 if has_example else 0.0)
+        has_instructions = any(
+            word in answer.lower()
+            for word in (
+                "как",
+                "следуйте",
+                "выполните",
+                "используйте",
+                "подключ",
+                "запуст",
+                "how to",
+                "follow",
+                "use",
+                "step",
+            )
+        )
+        has_example = bool(re.search(r"(example|например|sample|пример|```)", answer.lower()))
+        has_structure = bool(re.search(r"^\s*\d+\.", answer, re.MULTILINE))
+        score = (
+            length_score * 0.25
+            + (0.35 if has_instructions else 0.0)
+            + (0.2 if has_example else 0.0)
+            + (0.2 if has_structure else 0.0)
+        )
         return score * 10
 
     @staticmethod
@@ -239,18 +287,12 @@ class MetricsCalculator:
         return min(10.0, sum(1 for word in toxic_words if word in answer.lower()) * 2)
 
 
-QUESTIONS = {
-    3: "Create a step by step guide how to integrate sale form",
-    9: "What is a Connecting Party?",
-    13: "What is a merchant control key? Is it included in request?",
-    16: "Do I need private key for v4/transfer?",
-    19: "What is the difference between v2/sale and v2/sale-form?",
-    22: "Should I implement both status and callback handling?",
-    25: "How to calculate control parameter for v2/sale?",
-    30: "How to make a reversal?",
-    49: "What is the difference between RPI and card number?",
-    52: "Do I need PCI for v2/sale?",
-}
+def load_golden_cases(golden_path: Path) -> list[GoldenItem]:
+    """Load evaluation cases from the golden dataset."""
+    items = DatasetScanner(config.instructions_dir).load_golden_set(golden_path)
+    if not items:
+        raise FileNotFoundError(f"no golden cases found at {golden_path}")
+    return items
 
 
 def configure_logging(log_file: Path, is_verbose: bool) -> None:
@@ -263,29 +305,81 @@ def configure_logging(log_file: Path, is_verbose: bool) -> None:
     )
 
 
-def evaluate_response(question_id: int, question: str, response: dict[str, Any], calculator: MetricsCalculator) -> EvaluationResult:
+def evaluate_response(
+    golden_item: GoldenItem,
+    response: dict[str, Any],
+    calculator: MetricsCalculator,
+) -> EvaluationResult:
     """Build evaluation record from raw response."""
-    scores = MetricScores(
-        relevance=calculator.calculate_relevance(question, response["answer"]),
-        factuality=calculator.calculate_factuality(response["answer"]),
-        completeness=calculator.calculate_completeness(question, response["answer"]),
-        coherence=calculator.calculate_coherence(response["answer"]),
-        helpfulness=calculator.calculate_helpfulness(response["answer"]),
-        toxicity=calculator.calculate_toxicity(response["answer"]),
-    )
-    final_score = (
-        scores.relevance * 0.25
-        + scores.factuality * 0.25
-        + scores.completeness * 0.20
-        + scores.coherence * 0.15
-        + scores.helpfulness * 0.15
-    )
-    if scores.toxicity > 7:
-        final_score *= 0.5
-    grade = GradeLevel.EXCELLENT if final_score >= 9 else GradeLevel.GOOD if final_score >= 7 else GradeLevel.SATISFACTORY if final_score >= 5 else GradeLevel.POOR
+    question = golden_item.question
+    answer = str(response["answer"])
+
+    if is_unanswerable_expected(golden_item.expected_answer):
+        if is_not_found_answer(answer):
+            scores = MetricScores(
+                relevance=10.0,
+                factuality=10.0,
+                completeness=10.0,
+                coherence=10.0,
+                helpfulness=10.0,
+                toxicity=0.0,
+            )
+            final_score = 10.0
+            grade = GradeLevel.EXCELLENT
+            explanation = "correct not-found (docs have no answer)"
+        else:
+            scores = MetricScores(
+                relevance=calculator.calculate_relevance(question, answer),
+                factuality=2.0,
+                completeness=calculator.calculate_completeness(question, answer),
+                coherence=calculator.calculate_coherence(answer),
+                helpfulness=calculator.calculate_helpfulness(answer),
+                toxicity=calculator.calculate_toxicity(answer),
+            )
+            final_score = min(
+                4.0,
+                scores.relevance * 0.25
+                + scores.factuality * 0.25
+                + scores.completeness * 0.20
+                + scores.coherence * 0.15
+                + scores.helpfulness * 0.15,
+            )
+            grade = GradeLevel.POOR
+            explanation = "expected not-found but model hallucinated an answer"
+    else:
+        scores = MetricScores(
+            relevance=calculator.calculate_relevance(question, answer),
+            factuality=calculator.calculate_factuality(answer),
+            completeness=calculator.calculate_completeness(question, answer),
+            coherence=calculator.calculate_coherence(answer),
+            helpfulness=calculator.calculate_helpfulness(answer),
+            toxicity=calculator.calculate_toxicity(answer),
+        )
+        final_score = (
+            scores.relevance * 0.25
+            + scores.factuality * 0.25
+            + scores.completeness * 0.20
+            + scores.coherence * 0.15
+            + scores.helpfulness * 0.15
+        )
+        if is_not_found_answer(answer):
+            final_score = min(final_score, 3.0)
+        if scores.toxicity > 7:
+            final_score *= 0.5
+        grade = (
+            GradeLevel.EXCELLENT
+            if final_score >= 9
+            else GradeLevel.GOOD
+            if final_score >= 7
+            else GradeLevel.SATISFACTORY
+            if final_score >= 5
+            else GradeLevel.POOR
+        )
+        explanation = f"{grade.value} quality"
     return EvaluationResult(
-        id=question_id,
+        id=golden_item.id,
         question=question,
+        expected_answer=golden_item.expected_answer,
         answer=response["answer"],
         sources=response["sources"],
         selected_prompt=response["selected_prompt"],
@@ -295,15 +389,27 @@ def evaluate_response(question_id: int, question: str, response: dict[str, Any],
         tokens_used=response.get("tokens", 0),
         time_seconds=response["time_total"],
         gpt_time_seconds=response["gpt_time"],
-        explanation=f"{grade.value} quality",
+        explanation=explanation,
     )
 
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
-    parser = argparse.ArgumentParser(description="Full RAG evaluation.")
-    parser.add_argument("--questions", "-q", help="JSON file with questions")
+    parser = argparse.ArgumentParser(
+        description="Full RAG evaluation using instructions/golden/golden_set.json."
+    )
+    parser.add_argument(
+        "--golden",
+        "-g",
+        default=str(DEFAULT_GOLDEN_PATH),
+        help="Path to golden_set.json or instructions/golden/ directory.",
+    )
     parser.add_argument("--output", "-o", help="Output file for results")
+    parser.add_argument(
+        "--vector-store-dir",
+        default=str(DEFAULT_VECTOR_STORE_DIR),
+        help="Directory with chunks.json (same as load_graph_chunks.py --output-dir).",
+    )
     parser.add_argument("--verbose", "-v", action="store_true")
     return parser.parse_args()
 
@@ -315,32 +421,52 @@ def main() -> int:
     log_file = Path("logs") / f"full_evaluation_{timestamp}.log"
     log_file.parent.mkdir(exist_ok=True)
     configure_logging(log_file=log_file, is_verbose=args.verbose)
-    db.set_active_table("hypothesis")  # type: ignore[attr-defined]
-    log.info("[INFO] Using table: %s", db.get_active_table())  # type: ignore[attr-defined]
-    log.info("[INFO] Chunks in database: %s", db.get_chunk_count())
+    vector_store_dir = Path(args.vector_store_dir).resolve()
+    chunks_path = vector_store_dir / "chunks.json"
+    db.reload_store()
+    log.info("vector store backend=%s path=%s", db.backend_name, chunks_path)
     chunk_count = db.get_chunk_count()
-    log.info("database chunks=%s", chunk_count)
+    log.info("chunks loaded=%s", chunk_count)
     if chunk_count == 0:
-        log.error("no chunks in database, run load_graph_chunks.py first")
+        log.error("no chunks in %s, run load_graph_chunks.py first", chunks_path)
         return 1
+
+    try:
+        embedding_provider = configure_embeddings_for_index(vector_store_dir)
+    except ValueError as error:
+        log.error("%s", error)
+        log.error(
+            "re-index with one provider, e.g. "
+            "EMBEDDING_PROVIDER=ollama python load_graph_chunks.py --force-recreate"
+        )
+        return 1
+    log.info("query embeddings will use provider=%s", embedding_provider)
+
+    golden_path = Path(args.golden).resolve()
+    try:
+        golden_cases = load_golden_cases(golden_path)
+    except FileNotFoundError as error:
+        log.error("%s", error)
+        return 1
+
+    log.info("golden cases loaded=%s path=%s", len(golden_cases), golden_path)
 
     rag = RagWithGpt()
     metrics = MetricsCalculator()
-    questions_to_ask = QUESTIONS.copy()
-    if args.questions and Path(args.questions).exists():
-        with Path(args.questions).open("r", encoding="utf-8") as file_handle:
-            payload = json.load(file_handle)
-        if isinstance(payload, list):
-            questions_to_ask = {i + 1: item.get("question", str(item)) for i, item in enumerate(payload)}
-        elif isinstance(payload, dict) and "questions" in payload:
-            questions_to_ask = {i + 1: question for i, question in enumerate(payload["questions"])}
 
     results: list[EvaluationResult] = []
-    for question_id, question in questions_to_ask.items():
-        response = rag.ask(question)
-        evaluation = evaluate_response(question_id, question, response, metrics)
+    for golden_item in golden_cases:
+        response = rag.ask(golden_item.question)
+        evaluation = evaluate_response(golden_item, response, metrics)
         results.append(evaluation)
-        log.info("qid=%s score=%.2f grade=%s time=%s tokens=%s", question_id, evaluation.final_score, evaluation.grade.value, evaluation.time_seconds, evaluation.tokens_used)
+        log.info(
+            "qid=%s score=%.2f grade=%s time=%s tokens=%s",
+            evaluation.id,
+            evaluation.final_score,
+            evaluation.grade.value,
+            evaluation.time_seconds,
+            evaluation.tokens_used,
+        )
 
     total = len(results)
     avg_score = sum(item.final_score for item in results) / total
@@ -354,7 +480,12 @@ def main() -> int:
     output_file = Path(args.output) if args.output else Path(f"evaluation_results_{timestamp}.json")
     output_payload = {
         "timestamp": datetime.now().isoformat(),
-        "config": {"model": rag.gpt_model, "chunks": chunk_count, "questions": total},
+        "config": {
+            "model": rag.gpt_model,
+            "chunks": chunk_count,
+            "questions": total,
+            "golden_path": str(golden_path),
+        },
         "statistics": {
             "avg_score": round(avg_score, 2),
             "avg_time": round(avg_time, 2),
@@ -368,6 +499,7 @@ def main() -> int:
             {
                 "id": item.id,
                 "question": item.question,
+                "expected_answer": item.expected_answer,
                 "answer": item.answer,
                 "sources": [(source, page) for source, page in item.sources],
                 "selected_prompt": item.selected_prompt,
