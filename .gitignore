@@ -1,15 +1,14 @@
-# User documents (do not commit proprietary corpora)
-instructions/**/*.txt
-instructions/**/*.pdf
-instructions/**/*.md
-instructions/**/*.rst
-instructions/**/*.extract.txt
-
-# Keep directory structure in git
+# instructions/ — структура каталогов в git, содержимое локально
+instructions/raw/**
 !instructions/raw/.gitkeep
+instructions/graph/**
 !instructions/graph/.gitkeep
+instructions/golden/**
 !instructions/golden/.gitkeep
+instructions/few_shot/**
 !instructions/few_shot/.gitkeep
+instructions/*.extract.txt
+instructions/**/*.extract.txt
 
 # Python cache/bytecode
 __pycache__/
@@ -41,12 +40,7 @@ htmlcov/
 .env
 .env.*
 !.env.*.example
-
-# Generated data and RAG artifacts
 data/
-
-# JSON vector store temp files (atomic write)
-*.json.tmp
 
 # Jupyter
 .ipynb_checkpoints/
@@ -56,14 +50,13 @@ data/
 .vscode/
 *.swp
 *.swo
+desktop.ini
 
 # OS files
 .DS_Store
 Thumbs.db
-desktop.ini
 
 # Generated RAG/evaluation artifacts
-baseline/rag_answers_gpu.json
 logs/
 comparison/
 llm_evaluation/
@@ -71,14 +64,27 @@ gpt_evaluation/
 evaluation_results_*.json
 answers_*/
 *.stackdump
+*.json.tmp
+
+# Baseline: код и эталон в git, артефакты прогонов — нет
+baseline/rag_answers_gpu.json
+baseline/baseline_comparison.xlsx
+baseline/llm_judge_scores.json
+baseline/llm_judge_run.log
+baseline/evaluation_*.json
+
+# LibreChat local config (use librechat.example.yaml)
+librechat.yaml
+
+# Local document dumps
+doc-2.0-sources/
 
 # Local secret text files (defensive)
 *password*.txt
 *secret*.txt
 *api*key*.txt
 
-# LibreChat runtime config (secrets; use librechat.example.yaml)
-librechat.yaml
-
-# Legacy local document trees
-doc-2.0-sources/
+# Runtime vector stores and usage tracking
+data/vectors/
+data/vectors_test/
+data/openai_usage.json

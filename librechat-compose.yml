@@ -39,6 +39,7 @@ services:
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_INIT_PROJECT_PUBLIC_KEY}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_INIT_PROJECT_SECRET_KEY}
       - LANGFUSE_BASE_URL=http://langfuse-web:3000
+      - COMPACS_API_KEY=${COMPACS_API_KEY}
     volumes:
       - type: bind
         source: ./.env
