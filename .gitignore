@@ -1,4 +1,4 @@
-# instructions/ — структура каталогов в git, содержимое локально
+# instructions/ — структура в git, содержимое локально
 instructions/raw/**
 !instructions/raw/.gitkeep
 instructions/graph/**
@@ -56,28 +56,41 @@ desktop.ini
 .DS_Store
 Thumbs.db
 
-# Generated RAG/evaluation artifacts
+# LibreChat local config (шаблон: librechat.example.yaml)
+librechat.yaml
+
+# UI extension — локальные HTML/картинки и zip (индекс в data/vectors)
+UI extension/
+UI extension.zip
+
+# Document dumps / restore artifacts
+doc-2.0-sources/
+_restore_extract/
+
+# Generated RAG / evaluation artifacts
 logs/
 comparison/
 llm_evaluation/
 gpt_evaluation/
 evaluation_results_*.json
+evaluation_*.json
+evaluation_llama3b*.json
+evaluation_gpt*.json
+evaluation_ui_extension_*.json
+noisy_golden_queries.jsonl
 answers_*/
 *.stackdump
 *.json.tmp
 
-# Baseline: код и эталон в git, артефакты прогонов — нет
+# Excel comparison reports (regenerable)
+*.xlsx
+
+# Baseline: код и golden в git, прогоны — нет
 baseline/rag_answers_gpu.json
-baseline/baseline_comparison.xlsx
+baseline/evaluation_*.json
 baseline/llm_judge_scores.json
 baseline/llm_judge_run.log
-baseline/evaluation_*.json
-
-# LibreChat local config (use librechat.example.yaml)
-librechat.yaml
-
-# Local document dumps
-doc-2.0-sources/
+baseline/baseline_comparison.xlsx
 
 # Local secret text files (defensive)
 *password*.txt
@@ -87,4 +100,5 @@ doc-2.0-sources/
 # Runtime vector stores and usage tracking
 data/vectors/
 data/vectors_test/
+data/collections/
 data/openai_usage.json

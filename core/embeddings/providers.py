@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from functools import lru_cache
 
 import ollama
 
@@ -13,9 +14,7 @@ from core.openai_client import get_openai_client
 
 log = logging.getLogger(__name__)
 
-OPENAI_EMBEDDING_DIM = 1536
-OLLAMA_EMBEDDING_DIM = 768
-FALLBACK_EMBEDDING_SIZE = OPENAI_EMBEDDING_DIM
+FALLBACK_EMBEDDING_SIZE = 1536
 
 
 class EmbeddingProvider(ABC):
@@ -26,30 +25,9 @@ class EmbeddingProvider(ABC):
     def name(self) -> str:
         """Provider identifier."""
 
-    @property
-    @abstractmethod
-    def embedding_dim(self) -> int:
-        """Vector dimension produced by this provider."""
-
     @abstractmethod
     def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed a batch of texts."""
-
-
-def truncate_for_embedding(text: str, config: Config, *, provider: str) -> str:
-    """Truncate text to provider-specific limits before embedding."""
-    if provider == "ollama":
-        limit = min(config.max_text_length, config.ollama_embed_max_chars)
-    else:
-        limit = config.max_text_length
-    if len(text) <= limit:
-        return text
-    truncated = text[:limit]
-    if provider != "ollama":
-        last_period = truncated.rfind(".")
-        if last_period > limit // 2:
-            truncated = truncated[: last_period + 1]
-    return truncated.strip()
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
@@ -64,23 +42,28 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def name(self) -> str:
         return "openai"
 
-    @property
-    def embedding_dim(self) -> int:
-        return OPENAI_EMBEDDING_DIM
-
     def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
         response = self._client.embeddings.create(
             model=self._model,
-            input=[truncate_for_embedding(text, self._config, provider="openai") for text in texts],
+            input=[self._truncate(text) for text in texts],
             encoding_format="float",
         )
         return [list(item.embedding) for item in response.data]
 
+    def _truncate(self, text: str) -> str:
+        if len(text) <= self._config.max_text_length:
+            return text
+        truncated = text[: self._config.max_text_length]
+        last_period = truncated.rfind(".")
+        if last_period > self._config.max_text_length // 2:
+            truncated = truncated[: last_period + 1]
+        return truncated.strip()
+
 
 class OllamaEmbeddingProvider(EmbeddingProvider):
-    """Ollama embedding provider with per-item truncation and retries."""
+    """Ollama embedding provider."""
 
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -91,43 +74,26 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
     def name(self) -> str:
         return "ollama"
 
-    @property
-    def embedding_dim(self) -> int:
-        return OLLAMA_EMBEDDING_DIM
-
     def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
-        return [self._embed_one(text) for text in texts]
+        embeddings: list[list[float]] = []
+        for text in texts:
+            response = self._client.embeddings(model=self._model, prompt=self._truncate(text))
+            vector = response.get("embedding", [])
+            embeddings.append([float(value) for value in vector])
+        return embeddings
 
-    def _embed_one(self, text: str) -> list[float]:
-        limits = (
-            self._config.ollama_embed_max_chars,
-            self._config.ollama_embed_max_chars // 2,
-            800,
-        )
-        last_error: Exception | None = None
-        for limit in limits:
-            prompt = truncate_for_embedding(text, self._config, provider="ollama")
-            if len(prompt) > limit:
-                prompt = prompt[:limit].strip()
-            try:
-                response = self._client.embeddings(model=self._model, prompt=prompt)
-                vector = response.get("embedding", [])
-                return [float(value) for value in vector]
-            except Exception as error:
-                last_error = error
-                if "context length" not in str(error).lower():
-                    raise
-                log.debug(
-                    "ollama embed retry shorter text limit=%s chars=%s error=%s",
-                    limit,
-                    len(prompt),
-                    error,
-                )
-        raise RuntimeError(
-            f"ollama embedding failed after truncation (chars={len(text)}): {last_error}"
-        ) from last_error
+    def _truncate(self, text: str) -> str:
+        # nomic-embed-text context is ~8192 tokens; stay conservative in characters.
+        limit = min(self._config.max_text_length, 2048)
+        if len(text) <= limit:
+            return text
+        truncated = text[:limit]
+        last_period = truncated.rfind(".")
+        if last_period > limit // 2:
+            truncated = truncated[: last_period + 1]
+        return truncated.strip()
 
 
 def build_embedding_provider(config: Config) -> EmbeddingProvider:
@@ -136,6 +102,13 @@ def build_embedding_provider(config: Config) -> EmbeddingProvider:
         return OllamaEmbeddingProvider(config)
     if config.embedding_provider == "openai":
         return OpenAIEmbeddingProvider(config)
-    if config.openai_api_key:
+    if _openai_key_configured(config.openai_api_key):
         return OpenAIEmbeddingProvider(config)
     return OllamaEmbeddingProvider(config)
+
+
+def _openai_key_configured(key: str | None) -> bool:
+    if not key or not str(key).strip():
+        return False
+    normalized = str(key).strip().lower()
+    return normalized not in {"user_provided", "changeme", "none", "null"}

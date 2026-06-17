@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import statistics
 import sys
 import time
 from dataclasses import dataclass
@@ -38,7 +39,8 @@ def _apply_bootstrap_env() -> None:
 _apply_bootstrap_env()
 sys.path.insert(0, str(ROOT_DIR))
 
-from config import config
+from config import Config, config
+from core.cost_guard import CostGuard
 from core.database import db
 from core.datasets import DatasetScanner, GoldenItem
 from core.embedding_alignment import configure_embeddings_for_index
@@ -48,6 +50,15 @@ from core.evaluation_utils import (
     is_unanswerable_expected,
     tokenize_overlap,
 )
+from core.llm.usage import CompletionUsage
+from core.query_filter import filter_query
+from core.rag_metrics import (
+    estimate_tokens,
+    faithfulness_score,
+    hit_at_k,
+    merge_usage_dicts,
+)
+from core.llm.chain import LLMChain
 from core.reranker import reranker
 from router.smart_router import select_prompt
 
@@ -101,47 +112,78 @@ class EvaluationResult:
     time_seconds: float
     gpt_time_seconds: float
     explanation: str = ""
+    llm_provider: str = ""
+    llm_judge: dict[str, Any] | None = None
+    rag_metrics: dict[str, Any] | None = None
 
 
-class RagWithGpt:
-    """Answer questions via local vector store retrieval and OpenAI completion."""
+class RagRunner:
+    """Answer questions via local vector store retrieval and configured LLM chain."""
 
-    def __init__(self) -> None:
-        self.client: Any | None = None
-        self.gpt_model = config.openai_model
-        if OPENAI_AVAILABLE:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if api_key:
-                self.client = OpenAI(api_key=api_key)
-                log.info("openai client initialized model=%s", self.gpt_model)
-            else:
-                log.warning("OPENAI_API_KEY not found")
+    def __init__(self, llm_provider: str | None = None) -> None:
+        self._requested_provider = llm_provider
+        if llm_provider:
+            os.environ["LLM_PROVIDER"] = llm_provider
+        if llm_provider == "ollama":
+            os.environ["LLM_FALLBACK_ENABLED"] = "false"
+        elif llm_provider == "openai":
+            os.environ["LLM_FALLBACK_ENABLED"] = "false"
+        runtime_config = Config.from_env()
+        self._llm = LLMChain(runtime_config, CostGuard(runtime_config))
+        self.llm_provider = llm_provider or self._llm._primary.name
+        self.model_name = (
+            runtime_config.ollama_model
+            if self.llm_provider == "ollama"
+            else runtime_config.openai_model
+        )
+        log.info("llm provider=%s model=%s", self.llm_provider, self.model_name)
 
     def ask(self, question: str) -> dict[str, Any]:
-        """Generate one answer using retrieval + GPT."""
+        """Generate one answer using retrieval + LLM."""
         started_at = time.time()
-        query_embedding = list(embedder.embed_cached(question))
-        retrieved = db.search(query_embedding, query_text=question)
+        filter_result = filter_query(question)
+        filtered_question = filter_result.filtered if filter_result.filtered else question
+        query_embedding = list(embedder.embed_cached(filtered_question))
+        embed_tokens = estimate_tokens(
+            filtered_question,
+            provider="ollama" if self.llm_provider == "ollama" else "openai",
+        )
+        retrieval_started = time.time()
+        retrieved = db.search(query_embedding)
+        retrieval_time = time.time() - retrieval_started
         if not retrieved:
             return {
                 "question": question,
+                "filtered_question": filtered_question,
+                "query_filter": filter_result.__dict__,
                 "answer": "NOT FOUND in documentation",
                 "sources": [],
+                "context_chunks": [],
                 "selected_prompt": "none",
                 "time_total": round(time.time() - started_at, 2),
+                "retrieval_time": round(retrieval_time, 2),
                 "gpt_time": 0.0,
                 "tokens": 0,
+                "usage": merge_usage_dicts(
+                    {"prompt_tokens": embed_tokens, "completion_tokens": 0, "cost_usd": 0.0}
+                ),
             }
 
         reranked = reranker.rerank(question, retrieved)
+        use_ollama = (self._requested_provider or self.llm_provider) == "ollama"
+        chunk_limit = 350 if use_ollama else 800
+        context_k = min(3, config.rerank_top_k) if use_ollama else config.rerank_top_k
         context_parts: list[str] = []
+        context_chunks: list[str] = []
         sources: list[tuple[str, int]] = []
-        for chunk, source, page, _distance in reranked[: config.rerank_top_k]:
-            context_parts.append(f"[{source}, p.{page}]\n{chunk[:800]}")
+        for chunk, source, page, _distance in reranked[:context_k]:
+            snippet = chunk[:chunk_limit]
+            context_parts.append(f"[{source}, p.{page}]\n{snippet}")
+            context_chunks.append(chunk)
             sources.append((source, page))
         context = "\n\n".join(context_parts)
 
-        system_prompt, _num_predict, temperature = select_prompt(question)
+        system_prompt, num_predict, temperature = select_prompt(filtered_question)
         if "parameter" in system_prompt.lower() and "list" not in system_prompt.lower():
             prompt_name = "API Parameter Prompt"
         elif "list of parameters" in system_prompt.lower():
@@ -149,38 +191,60 @@ class RagWithGpt:
         else:
             prompt_name = "API Info Prompt"
 
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {filtered_question}"},
+        ]
         answer = ""
-        tokens = 0
-        gpt_started_at = time.time()
-        if self.client is not None:
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.gpt_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"},
-                    ],
-                    temperature=temperature,
-                    max_tokens=config.openai_max_tokens,
-                )
-                answer = response.choices[0].message.content
-                tokens = response.usage.total_tokens
-            except Exception as error:
-                answer = f"ERROR: {error}"
-                log.error("gpt request failed: %s", error)
-        else:
-            answer = "ERROR: OpenAI not available"
+        llm_usage = CompletionUsage()
+        llm_started_at = time.time()
+        max_tokens = min(num_predict, 600) if self.llm_provider == "ollama" else num_predict
+        try:
+            completion = self._llm.complete(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if len(completion) == 3:
+                answer, provider_used, llm_usage = completion
+            else:
+                answer, provider_used = completion
+                llm_usage = CompletionUsage()
+            self.llm_provider = provider_used
+        except Exception as error:
+            answer = f"ERROR: {error}"
+            log.error("llm request failed: %s", error)
+        if not (answer or "").strip() and self.llm_provider == "ollama":
+            log.warning("ollama returned empty answer; try NUM_CTX=8192 or a larger model")
 
-        gpt_time = time.time() - gpt_started_at
+        llm_time = time.time() - llm_started_at
+        total_usage = merge_usage_dicts(
+            {
+                "prompt_tokens": embed_tokens,
+                "completion_tokens": 0,
+                "cost_usd": 0.0,
+            },
+            llm_usage.to_dict(),
+        )
         return {
             "question": question,
+            "filtered_question": filtered_question,
+            "query_filter": filter_result.__dict__,
             "answer": answer,
             "sources": sources,
+            "context_chunks": context_chunks,
             "selected_prompt": prompt_name,
             "time_total": round(time.time() - started_at, 2),
-            "gpt_time": round(gpt_time, 2),
-            "tokens": tokens,
+            "retrieval_time": round(retrieval_time, 2),
+            "gpt_time": round(llm_time, 2),
+            "tokens": total_usage["total_tokens"],
+            "usage": total_usage,
+            "llm_provider": self.llm_provider,
         }
+
+
+# Backward-compatible alias
+RagWithGpt = RagRunner
 
 
 class MetricsCalculator:
@@ -376,6 +440,26 @@ def evaluate_response(
             else GradeLevel.POOR
         )
         explanation = f"{grade.value} quality"
+
+    context_chunks = list(response.get("context_chunks") or [])
+    usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+    rag_metrics = {
+        "hit_at_3": round(
+            hit_at_k(golden_item.expected_answer, context_chunks, k=3),
+            3,
+        ),
+        "faithfulness": round(
+            faithfulness_score(answer, context_chunks),
+            3,
+        ),
+        "retrieval_time_seconds": response.get("retrieval_time", 0.0),
+        "llm_time_seconds": response.get("gpt_time", 0.0),
+        "latency_seconds": response.get("time_total", 0.0),
+        "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+        "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+        "total_tokens": int(usage.get("total_tokens", response.get("tokens", 0)) or 0),
+        "cost_usd": float(usage.get("cost_usd", 0.0) or 0.0),
+    }
     return EvaluationResult(
         id=golden_item.id,
         question=question,
@@ -386,10 +470,12 @@ def evaluate_response(
         scores=scores,
         final_score=round(final_score, 2),
         grade=grade,
-        tokens_used=response.get("tokens", 0),
+        tokens_used=int(rag_metrics["total_tokens"]),
         time_seconds=response["time_total"],
         gpt_time_seconds=response["gpt_time"],
         explanation=explanation,
+        llm_provider=str(response.get("llm_provider", "")),
+        rag_metrics=rag_metrics,
     )
 
 
@@ -411,11 +497,43 @@ def parse_args() -> argparse.Namespace:
         help="Directory with chunks.json (same as load_graph_chunks.py --output-dir).",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument(
+        "--llm-provider",
+        choices=("ollama", "openai", "auto"),
+        default="ollama",
+        help="LLM for answer generation (default: ollama / llama3.2:3b).",
+    )
+    parser.add_argument(
+        "--llm-judge",
+        action="store_true",
+        help="Score each answer with GPT judge (see --judge-model).",
+    )
+    parser.add_argument(
+        "--judge-model",
+        default="gpt-4o-mini",
+        help="OpenAI model for LLM judge when --llm-judge is set (default: gpt-4o-mini).",
+    )
+    parser.add_argument(
+        "--judge-backend",
+        choices=("openai", "ollama"),
+        default="openai",
+        help="Backend for LLM judge (default: openai).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Evaluate only first N golden questions (0 = all).",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     """Run full evaluation pipeline."""
+    from dotenv import load_dotenv
+
+    load_dotenv(".env.rag", override=True)
+    os.environ["CACHE_ENABLED"] = "false"
     args = parse_args()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = Path("logs") / f"full_evaluation_{timestamp}.log"
@@ -449,15 +567,68 @@ def main() -> int:
         log.error("%s", error)
         return 1
 
+    if args.limit and args.limit > 0:
+        golden_cases = golden_cases[: args.limit]
     log.info("golden cases loaded=%s path=%s", len(golden_cases), golden_path)
 
-    rag = RagWithGpt()
+    llm_provider = args.llm_provider
+    if llm_provider == "ollama":
+        try:
+            import ollama
+
+            ollama.list()
+        except (RuntimeError, OSError, ValueError) as error:
+            log.error("ollama is not running: %s", error)
+            return 1
+
+    rag = RagRunner(llm_provider=llm_provider)
     metrics = MetricsCalculator()
+    llm_judge_fn = None
+    judge_model = args.judge_model
+    if args.llm_judge:
+        if args.judge_backend == "openai":
+            from llm_evaluate import evaluate_answer_percent_openai
+
+            runtime_config = Config.from_env()
+            api_key = runtime_config.openai_api_key
+            if not api_key or api_key.strip() == "user_provided":
+                log.error("OPENAI_API_KEY in .env.rag required for GPT judge")
+                return 1
+            llm_judge_fn = lambda q, a: evaluate_answer_percent_openai(q, a, model=judge_model)
+            log.info("llm judge enabled backend=openai model=%s", judge_model)
+        else:
+            from llm_evaluate import evaluate_answer_percent
+
+            llm_judge_fn = evaluate_answer_percent
+            log.info("llm judge enabled backend=ollama model=%s", config.ollama_model)
 
     results: list[EvaluationResult] = []
     for golden_item in golden_cases:
         response = rag.ask(golden_item.question)
         evaluation = evaluate_response(golden_item, response, metrics)
+        if llm_judge_fn is not None:
+            evaluation.llm_provider = str(response.get("llm_provider", llm_provider))
+            evaluation.llm_judge = llm_judge_fn(golden_item.question, str(response.get("answer", "")))
+            if evaluation.rag_metrics and evaluation.llm_judge:
+                evaluation.rag_metrics["judge_tokens"] = int(
+                    evaluation.llm_judge.get("judge_tokens", 0) or 0
+                )
+                evaluation.rag_metrics["judge_cost_usd"] = float(
+                    evaluation.llm_judge.get("judge_cost_usd", 0.0) or 0.0
+                )
+                evaluation.rag_metrics["cost_usd"] = round(
+                    float(evaluation.rag_metrics.get("cost_usd", 0.0))
+                    + evaluation.rag_metrics["judge_cost_usd"],
+                    6,
+                )
+                evaluation.tokens_used = int(evaluation.rag_metrics.get("total_tokens", 0)) + int(
+                    evaluation.rag_metrics["judge_tokens"]
+                )
+            log.info(
+                "qid=%s llm_judge_total=%.1f",
+                evaluation.id,
+                float((evaluation.llm_judge or {}).get("total", 0)),
+            )
         results.append(evaluation)
         log.info(
             "qid=%s score=%.2f grade=%s time=%s tokens=%s",
@@ -469,9 +640,34 @@ def main() -> int:
         )
 
     total = len(results)
-    avg_score = sum(item.final_score for item in results) / total
+    score_values = [item.final_score for item in results]
+    avg_score = sum(score_values) / total
     avg_time = sum(item.time_seconds for item in results) / total
     avg_tokens = sum(item.tokens_used for item in results) / total
+    rag_with_metrics = [item for item in results if item.rag_metrics]
+    avg_hit_at_3 = (
+        sum(float(item.rag_metrics["hit_at_3"]) for item in rag_with_metrics) / len(rag_with_metrics)
+        if rag_with_metrics
+        else 0.0
+    )
+    avg_faithfulness = (
+        sum(float(item.rag_metrics["faithfulness"]) for item in rag_with_metrics)
+        / len(rag_with_metrics)
+        if rag_with_metrics
+        else 0.0
+    )
+    avg_cost_usd = (
+        sum(float(item.rag_metrics.get("cost_usd", 0.0)) for item in rag_with_metrics)
+        / len(rag_with_metrics)
+        if rag_with_metrics
+        else 0.0
+    )
+    avg_retrieval_time = (
+        sum(float(item.rag_metrics.get("retrieval_time_seconds", 0.0)) for item in rag_with_metrics)
+        / len(rag_with_metrics)
+        if rag_with_metrics
+        else 0.0
+    )
     excellent = sum(1 for item in results if item.grade == GradeLevel.EXCELLENT)
     good = sum(1 for item in results if item.grade == GradeLevel.GOOD)
     satisfactory = sum(1 for item in results if item.grade == GradeLevel.SATISFACTORY)
@@ -481,19 +677,29 @@ def main() -> int:
     output_payload = {
         "timestamp": datetime.now().isoformat(),
         "config": {
-            "model": rag.gpt_model,
+            "model": rag.model_name,
+            "llm_provider": llm_provider,
+            "llm_judge": args.llm_judge,
+            "judge_backend": args.judge_backend if args.llm_judge else None,
+            "judge_model": judge_model if args.llm_judge else None,
             "chunks": chunk_count,
             "questions": total,
             "golden_path": str(golden_path),
         },
         "statistics": {
             "avg_score": round(avg_score, 2),
+            "std_score": round(statistics.stdev(score_values), 3) if total > 1 else 0.0,
+            "variance_score": round(statistics.variance(score_values), 3) if total > 1 else 0.0,
             "avg_time": round(avg_time, 2),
             "avg_tokens": round(avg_tokens, 0),
             "excellent": excellent,
             "good": good,
             "satisfactory": satisfactory,
             "poor": poor,
+            "avg_hit_at_3": round(avg_hit_at_3, 3),
+            "avg_faithfulness": round(avg_faithfulness, 3),
+            "avg_cost_usd": round(avg_cost_usd, 6),
+            "avg_retrieval_time": round(avg_retrieval_time, 2),
         },
         "results": [
             {
@@ -509,10 +715,36 @@ def main() -> int:
                 "tokens": item.tokens_used,
                 "time": item.time_seconds,
                 "explanation": item.explanation,
+                "llm_provider": item.llm_provider,
+                "llm_judge": item.llm_judge,
+                "rag_metrics": item.rag_metrics,
             }
             for item in results
         ],
     }
+    if args.llm_judge:
+        judge_totals = [
+            float((item.llm_judge or {}).get("total", 0))
+            for item in results
+            if item.llm_judge and "error" not in item.llm_judge
+        ]
+        if judge_totals:
+            output_payload["statistics"]["llm_judge_avg_percent"] = round(
+                sum(judge_totals) / len(judge_totals), 1
+            )
+            if len(judge_totals) > 1:
+                output_payload["statistics"]["llm_judge_std_percent"] = round(
+                    statistics.stdev(judge_totals), 2
+                )
+                output_payload["statistics"]["llm_judge_variance_percent"] = round(
+                    statistics.variance(judge_totals), 2
+                )
+            log.info(
+                "llm judge avg=%.1f%% (%s %s)",
+                output_payload["statistics"]["llm_judge_avg_percent"],
+                args.judge_backend,
+                judge_model if args.judge_backend == "openai" else config.ollama_model,
+            )
     with output_file.open("w", encoding="utf-8") as file_handle:
         json.dump(output_payload, file_handle, ensure_ascii=False, indent=2)
 

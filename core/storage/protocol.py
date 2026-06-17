@@ -109,6 +109,7 @@ class VectorStore(ABC):
         query_embedding: np.ndarray,
         limit: int,
         similarity_threshold: float,
+        source_prefixes: list[str] | None = None,
     ) -> list[ChunkRecord]:
         """Search for similar chunks ordered by relevance."""
 
@@ -119,6 +120,10 @@ class VectorStore(ABC):
     @abstractmethod
     def delete_by_source(self, source: str) -> int:
         """Delete all chunks from a source."""
+
+    @abstractmethod
+    def delete_by_source_prefix(self, prefix: str) -> int:
+        """Delete all chunks whose source starts with ``prefix``."""
 
     @abstractmethod
     def list_sources(self) -> list[str]:

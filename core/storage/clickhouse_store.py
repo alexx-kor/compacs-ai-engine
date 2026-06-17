@@ -58,9 +58,22 @@ class ClickHouseVectorStore(VectorStore):
         query_embedding: np.ndarray,
         limit: int,
         similarity_threshold: float,
+        source_prefixes: list[str] | None = None,
     ) -> list[ChunkRecord]:
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
+        prefix_filter = ""
+        parameters: dict[str, Any] = {
+            "embedding": [float(value) for value in query_embedding.tolist()],
+            "threshold": similarity_threshold,
+            "limit": limit,
+        }
+        if source_prefixes:
+            prefix_filter = " AND (" + " OR ".join(
+                f"startsWith(source, %(prefix{i})s)" for i in range(len(source_prefixes))
+            ) + ")"
+            for index, prefix in enumerate(source_prefixes):
+                parameters[f"prefix{index}"] = prefix
         query = f"""
             SELECT
                 toString(id),
@@ -73,17 +86,11 @@ class ClickHouseVectorStore(VectorStore):
                 created_at
             FROM {_TABLE}
             WHERE cosineDistance(embedding, %(embedding)s) < %(threshold)s
+            {prefix_filter}
             ORDER BY cosineDistance(embedding, %(embedding)s) ASC
             LIMIT %(limit)s
         """
-        result = self._client.query(
-            query,
-            parameters={
-                "embedding": [float(value) for value in query_embedding.tolist()],
-                "threshold": similarity_threshold,
-                "limit": limit,
-            },
-        )
+        result = self._client.query(query, parameters=parameters)
         return [self._row_to_record(row) for row in result.result_rows]
 
     def insert_batch(self, chunks: list[ChunkRecord]) -> int:
@@ -114,6 +121,15 @@ class ClickHouseVectorStore(VectorStore):
         self._client.command(
             f"ALTER TABLE {_TABLE} DELETE WHERE source = %(source)s",
             parameters={"source": source},
+        )
+        after = self.chunk_count()
+        return max(before - after, 0)
+
+    def delete_by_source_prefix(self, prefix: str) -> int:
+        before = self.chunk_count()
+        self._client.command(
+            f"ALTER TABLE {_TABLE} DELETE WHERE startsWith(source, %(prefix)s)",
+            parameters={"prefix": prefix},
         )
         after = self.chunk_count()
         return max(before - after, 0)

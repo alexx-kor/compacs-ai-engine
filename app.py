@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import multiprocessing
+import os
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +34,47 @@ def main(
 
 
 @app.command("serve-api")
-def serve_api(port: int = typer.Option(8080, help="Stable API port")) -> None:
-    """Serve production RAG API."""
-    uvicorn.run("api.stable:app_stable", host="0.0.0.0", port=port, reload=False)
+def serve_api(
+    port: int = typer.Option(8080, help="Stable API port"),
+    host: str = typer.Option("0.0.0.0", help="Bind host"),
+) -> None:
+    """Serve production RAG API (engine)."""
+    uvicorn.run("api.stable:app_stable", host=host, port=port, reload=False)
+
+
+@app.command("serve-gateway")
+def serve_gateway(port: int = typer.Option(3080, help="Gateway port")) -> None:
+    """Serve external gateway UI and API proxy."""
+    os.environ["GATEWAY_PORT"] = str(port)
+    uvicorn.run("api.gateway:app_gateway", host="0.0.0.0", port=port, reload=False)
+
+
+@app.command("serve")
+def serve(
+    gateway_port: int = typer.Option(3080, help="External gateway port"),
+    engine_port: int = typer.Option(8080, help="Internal engine port"),
+) -> None:
+    """Serve gateway (:3080) and RAG engine (:8080, localhost only)."""
+    os.environ["RAG_ENGINE_URL"] = f"http://127.0.0.1:{engine_port}"
+    os.environ["GATEWAY_PORT"] = str(gateway_port)
+    engine = multiprocessing.Process(
+        target=serve_api,
+        kwargs={"port": engine_port, "host": "127.0.0.1"},
+    )
+    gateway = multiprocessing.Process(
+        target=serve_gateway,
+        kwargs={"port": gateway_port},
+    )
+    engine.start()
+    gateway.start()
+    log.info("RAG engine http://127.0.0.1:%s", engine_port)
+    log.info("Gateway http://0.0.0.0:%s", gateway_port)
+    try:
+        engine.join()
+        gateway.join()
+    except KeyboardInterrupt:
+        engine.terminate()
+        gateway.terminate()
 
 
 @app.command("serve-dev")

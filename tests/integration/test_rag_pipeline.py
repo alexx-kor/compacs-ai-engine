@@ -20,6 +20,10 @@ class _FakeLLMChain:
     def complete(self, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> tuple[str, str]:
         return "mock answer from docs", "ollama"
 
+    def stream_complete(self, messages: list[dict[str, str]], temperature: float, max_tokens: int):
+        yield "mock ", "ollama"
+        yield "stream", "ollama"
+
 
 class _FakeVectorStore:
     backend_name = "json"
@@ -60,7 +64,7 @@ def test_rag_pipeline_returns_answer_with_sources(monkeypatch: Any) -> None:
     class _FakeDatabase:
         backend_name = "json"
 
-        def search(self, embedding: list[float]) -> list[tuple[Any, ...]]:
+        def search(self, embedding: list[float], source_prefixes=None) -> list[tuple[Any, ...]]:
             records = fake_store.search(np.asarray(embedding), limit=5, similarity_threshold=0.5)
             return [(record.chunk, record.source, record.page, 0.1) for record in records]
 
@@ -71,8 +75,40 @@ def test_rag_pipeline_returns_answer_with_sources(monkeypatch: Any) -> None:
             return None
 
     monkeypatch.setattr("rag_service.db", _FakeDatabase())
+    monkeypatch.setattr("core.collections.collection_service.active_source_prefixes", lambda *a, **k: None)
+    monkeypatch.setattr("core.collections.collection_service.get_selection", lambda: [])
     service = RagService(embedding_chain=_FakeEmbeddingChain(), llm_chain=_FakeLLMChain())
     result = service.ask("How do I configure ClickHouse?")
     assert result["answer"] == "mock answer from docs"
     assert result["sources"]
     assert result["provider_used"] == "ollama"
+
+
+def test_rag_stream_yields_tokens_and_done(monkeypatch: Any) -> None:
+    fake_store = _FakeVectorStore()
+
+    class _FakeDatabase:
+        backend_name = "json"
+
+        def search(self, embedding: list[float], source_prefixes=None) -> list[tuple[Any, ...]]:
+            records = fake_store.search(np.asarray(embedding), limit=5, similarity_threshold=0.5)
+            return [(record.chunk, record.source, record.page, 0.1) for record in records]
+
+        def resolve_cache(self, _key: str) -> str | None:
+            return None
+
+        def set_cache(self, _key: str, _value: str) -> None:
+            return None
+
+    monkeypatch.setattr("rag_service.db", _FakeDatabase())
+    monkeypatch.setattr("core.collections.collection_service.active_source_prefixes", lambda *a, **k: None)
+    monkeypatch.setattr("core.collections.collection_service.get_selection", lambda: [])
+
+    service = RagService(embedding_chain=_FakeEmbeddingChain(), llm_chain=_FakeLLMChain())
+    events = list(service.ask_stream("stream question?"))
+    assert events[0]["event"] == "status"
+    tokens = [e for e in events if e["event"] == "token"]
+    assert "".join(t["data"]["text"] for t in tokens) == "mock stream"
+    done = next(e for e in events if e["event"] == "done")
+    assert done["data"]["answer"] == "mock stream"
+    assert done["data"]["provider_used"] == "ollama"

@@ -35,7 +35,6 @@ def _test_config(tmp_path: Path) -> Config:
         ollama_host=base.ollama_host,
         ollama_model=base.ollama_model,
         embed_model=base.embed_model,
-        ollama_embed_max_chars=base.ollama_embed_max_chars,
         chunk_size=base.chunk_size,
         chunk_overlap=base.chunk_overlap,
         top_k=base.top_k,
@@ -52,12 +51,6 @@ def _test_config(tmp_path: Path) -> Config:
         repeat_penalty=base.repeat_penalty,
         cache_enabled=base.cache_enabled,
         cache_ttl=base.cache_ttl,
-        chunk_strategies=base.chunk_strategies,
-        hybrid_search_enabled=base.hybrid_search_enabled,
-        hybrid_dense_weight=base.hybrid_dense_weight,
-        hybrid_bm25_weight=base.hybrid_bm25_weight,
-        rerank_lemmatize=base.rerank_lemmatize,
-        bm25_lemmatize=base.bm25_lemmatize,
     )
 
 

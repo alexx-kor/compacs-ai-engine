@@ -1,0 +1,90 @@
+# COMPACS RAG v2 — production Docker stand
+# Gateway :3080 (public) · Engine :8080 (internal) · Ollama
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  rag-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: compacs-rag-engine:2.0
+    restart: unless-stopped
+    command:
+      - python
+      - -m
+      - uvicorn
+      - api.stable:app_stable
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+    env_file:
+      - .env.rag
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-json}
+      LOCAL_VECTOR_STORE_DIR: /app/data/vectors
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      LLM_FALLBACK_ENABLED: "false"
+      EMBEDDING_FALLBACK_ENABLED: "false"
+    volumes:
+      - rag_data:/app/data
+    expose:
+      - "8080"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  rag-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: compacs-rag-gateway:2.0
+    restart: unless-stopped
+    command:
+      - gunicorn
+      - wsgi:app
+      - -c
+      - gunicorn.conf.py
+    env_file:
+      - .env.rag
+    environment:
+      RAG_ENGINE_URL: http://rag-engine:8080
+      GATEWAY_BIND: 0.0.0.0:3080
+      GATEWAY_WORKERS: ${GATEWAY_WORKERS:-4}
+      GATEWAY_TIMEOUT: ${GATEWAY_TIMEOUT:-120}
+    ports:
+      - "${RAG_GATEWAY_PORT:-3080}:3080"
+    depends_on:
+      rag-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  ollama_models:
+  rag_data:

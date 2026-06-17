@@ -28,6 +28,7 @@ def is_not_found_answer(text: str) -> bool:
     for phrase in NOT_FOUND_PHRASES:
         cleaned = cleaned.replace(phrase, "")
     cleaned = re.sub(r"[\s\-–—•.]+", " ", cleaned).strip()
+    # Substantive content remains after stripping boilerplate refusals
     return len(cleaned) < 80
 
 

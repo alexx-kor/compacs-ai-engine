@@ -10,8 +10,6 @@ from typing import Any
 import numpy as np
 
 from config import config
-from core.bm25_index import Bm25Index
-from core.hybrid_retriever import merge_dense_bm25
 from core.storage.factory import create_vector_store
 from core.storage.protocol import ChunkRecord, VectorStore
 
@@ -25,9 +23,6 @@ class DatabaseManager:
         self._store: VectorStore = create_vector_store(config)
         self._cache: dict[str, str] = {}
         self._cache_time: dict[str, float] = {}
-        self._bm25: Bm25Index | None = Bm25Index.load(
-            config.local_vector_store_dir / "bm25_index.json"
-        )
 
     @property
     def vector_store(self) -> VectorStore:
@@ -43,9 +38,13 @@ class DatabaseManager:
         self._store.init_store(force_recreate=force_recreate)
 
     def reload_store(self) -> None:
-        """Reload vector store and BM25 sidecar from disk."""
+        """Recreate vector store handle after env/path changes."""
         self._store = create_vector_store(config)
-        self._bm25 = Bm25Index.load(config.local_vector_store_dir / "bm25_index.json")
+
+    def save_bm25_index(self, chunks: list[dict[str, Any]]) -> None:
+        """Legacy BM25 sidecar hook (dense-only path ignores this)."""
+        _ = chunks
+        log.debug("save_bm25_index skipped (BM25 sidecar not active)")
 
     def insert_batch(self, chunks: list[dict[str, Any]], dataset_kind: str = "raw") -> None:
         """Insert legacy chunk dictionaries."""
@@ -54,33 +53,21 @@ class DatabaseManager:
         records = [ChunkRecord.from_legacy_dict(chunk, dataset_kind=dataset_kind) for chunk in chunks]
         self._store.insert_batch(records)
 
-    def search(self, embedding: list[float], query_text: str = "") -> list[tuple[Any, ...]]:
+    def search(
+        self,
+        embedding: list[float],
+        source_prefixes: list[str] | None = None,
+    ) -> list[tuple[Any, ...]]:
         """Search and return legacy tuples ``(chunk, source, page, distance)``."""
         query = np.asarray(embedding, dtype=np.float64)
-        pool_limit = max(config.top_k * 3, config.top_k)
         records = self._store.search(
             query_embedding=query,
-            limit=pool_limit,
+            limit=config.top_k,
             similarity_threshold=config.similarity_threshold,
+            source_prefixes=source_prefixes,
         )
-        if config.hybrid_search_enabled and self._bm25 is not None and query_text.strip():
-            catalog = {row.id: row for row in self._store.load_all_records()}
-            records = merge_dense_bm25(
-                records,
-                query_text,
-                query,
-                self._bm25,
-                config,
-                catalog,
-            )
-        else:
-            records = records[: config.top_k]
-
-        query_dim = int(query.shape[0])
         tuples: list[tuple[Any, ...]] = []
         for record in records:
-            if int(record.embedding.shape[0]) != query_dim:
-                continue
             distance = float(
                 1.0
                 - float(
@@ -90,17 +77,6 @@ class DatabaseManager:
             )
             tuples.append((record.chunk, record.source, record.page, distance))
         return tuples
-
-    def reload_bm25_index(self) -> None:
-        """Reload BM25 sidecar after re-indexing."""
-        self._bm25 = Bm25Index.load(config.local_vector_store_dir / "bm25_index.json")
-
-    def save_bm25_index(self, chunks: list[dict[str, Any]]) -> None:
-        """Build and persist BM25 index from legacy chunk dicts."""
-        index = Bm25Index.from_chunks(chunks, lemmatize=config.bm25_lemmatize)
-        path = config.local_vector_store_dir / "bm25_index.json"
-        index.save(path)
-        self._bm25 = index
 
     def get_chunk_count(self) -> int:
         return self._store.chunk_count()

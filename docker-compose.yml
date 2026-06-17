@@ -1,9 +1,7 @@
-# Main Docker Compose entrypoint.
-#
-# `include:` requires Docker Compose v2.20+ (you have v2.15.x).
-# Service definitions live in the files listed in COMPOSE_FILE (.env).
-#
-# Manual merge (same as `docker compose up -d` with COMPOSE_FILE set):
-#   docker compose -f langfuse-compose.yml -f clickhouse-mcp-compose.yml -f librechat-compose.yml up -d
+# Main Docker Compose file
+# Includes all services: Langfuse, ClickHouse MCP, and LibreChat
 
-services: {}
+include:
+  - langfuse-compose.yml
+  - clickhouse-mcp-compose.yml
+  - librechat-compose.yml

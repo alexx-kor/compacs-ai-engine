@@ -32,7 +32,7 @@ LANGFUSE_INIT_PROJECT_SECRET_KEY="sk-lf-$(openssl rand -hex 16)"
 CLICKHOUSE_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 
 # Generate LibreChat-specific credentials
-LIBRECHAT_PORT=${LIBRECHAT_PORT:-3080}
+LIBRECHAT_PORT=${LIBRECHAT_PORT:-3081}
 RAG_PORT=${RAG_PORT:-8001}
 MEILI_MASTER_KEY=$(openssl rand -hex 32)
 VECTORDB_DB=${VECTORDB_DB:-librechat_vectordb}
@@ -43,9 +43,6 @@ VECTORDB_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
 # Generate LibreChat JWT secret (required for authentication)
 JWT_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
 JWT_REFRESH_SECRET=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-32)
-
-# Compacs RAG API key (LibreChat custom endpoint + compacs-rag auth)
-COMPACS_API_KEY=${COMPACS_API_KEY:-$(openssl rand -hex 24)}
 
 # # Prompt for user email or use default
 # read -p "Enter initial Langfuse user email (default: admin@example.com): " USER_EMAIL
@@ -153,7 +150,7 @@ REDIS_PORT=6379
 # ============================================
 # LibreChat Configuration
 # ============================================
-LIBRECHAT_PORT=${LIBRECHAT_PORT:-3080}
+LIBRECHAT_PORT=${LIBRECHAT_PORT:-3081}
 RAG_PORT=${RAG_PORT:-8001}
 MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
 VECTORDB_DB=${VECTORDB_DB:-librechat_vectordb}
@@ -165,7 +162,6 @@ VECTORDB_PASSWORD=${VECTORDB_PASSWORD}
 # ============================================
 JWT_SECRET=${JWT_SECRET}
 JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-COMPACS_API_KEY=${COMPACS_API_KEY}
 
 # LibreChat Initial User
 # Note: These are the same as the Langfuse credentials by default

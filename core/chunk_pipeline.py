@@ -1,204 +1,111 @@
-"""Multi-strategy chunk builder: sliding, sections, definitions, graph, Q&A."""
+"""Multi-strategy chunking for legacy ingest and UI extension pipelines."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from config import config
-from core.datasets import DatasetScanner
 from core.document_processor import doc_processor
-from core.knowledge_graph import (
-    extract_graph_from_instruction_files,
-    save_graph_artifacts,
-    triples_to_graph_chunks,
-)
-from core.text_processing import (
-    PreprocessProfile,
-    extract_definition_lines,
-    format_chunk_markup,
-    preprocess_text,
-    split_sections,
-)
 
 log = logging.getLogger(__name__)
 
+DEFAULT_STRATEGIES = ("sliding", "section", "definition")
+_SECTION_RE = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+|[A-ZА-ЯЁ][A-ZА-ЯЁ0-9\s\-]{4,}$)")
+_DEFINITION_RE = re.compile(r"(?:^|\n)(?:«[^»]+»|[A-Za-zА-Яа-яЁё0-9_.-]+)\s*[—\-–:]\s*.+", re.MULTILINE)
 
-def _make_chunk(
-    *,
+
+def _relative_source(path: Path, base: Path) -> str:
+    try:
+        return path.relative_to(base).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _chunk_dict(
     chunk_id: int,
     source: str,
     page: int,
-    body: str,
+    text: str,
     chunk_type: str,
-    section: str = "",
-    profile: str = "baseline",
-    extra: dict | None = None,
-) -> dict:
-    marked = format_chunk_markup(
-        body,
-        chunk_type=chunk_type,
-        source=source,
-        section=section,
-        profile=profile,
-    )
-    payload: dict = {
+) -> dict[str, Any]:
+    cleaned = text.strip()
+    if len(cleaned) <= config.min_chunk_size:
+        return {}
+    if len(cleaned) > config.max_text_length:
+        cleaned = cleaned[: config.max_text_length]
+    return {
         "id": chunk_id,
         "source": source,
         "page": page,
-        "chunk": marked,
-        "chunk_hash": hashlib.md5(marked.encode()).hexdigest(),
-        "char_count": len(marked),
+        "chunk": cleaned,
+        "chunk_hash": hashlib.md5(cleaned.encode()).hexdigest(),
+        "char_count": len(cleaned),
         "chunk_type": chunk_type,
-        "preprocess_profile": profile,
     }
-    if section:
-        payload["section"] = section
-    if extra:
-        payload.update(extra)
-    return payload
 
 
-def build_sliding_chunks(files: Sequence[Path], start_id: int) -> list[dict]:
-    """Classic overlapping word windows."""
-    chunks: list[dict] = []
-    next_id = start_id
-    for source_file in files:
-        raw = source_file.read_text(encoding="utf-8")
-        cleaned = preprocess_text(raw, PreprocessProfile.BASELINE)
-        temp_path = source_file
-        file_chunks = doc_processor.process_document(str(temp_path), source_file.name, next_id)
-        for item in file_chunks:
-            item["chunk_type"] = "sliding"
-            item["preprocess_profile"] = PreprocessProfile.BASELINE.value
-            item["chunk"] = format_chunk_markup(
-                preprocess_text(item["chunk"], PreprocessProfile.BASELINE),
-                chunk_type="sliding",
-                source=source_file.name,
-            )
-            item["chunk_hash"] = hashlib.md5(item["chunk"].encode()).hexdigest()
-        chunks.extend(file_chunks)
-        next_id += len(file_chunks)
-        log.info("sliding chunks: source=%s count=%s", source_file.name, len(file_chunks))
+def _sliding_chunks(file_path: Path, source: str, start_id: int) -> list[dict[str, Any]]:
+    raw = doc_processor.process_document(str(file_path), source, start_id)
+    for item in raw:
+        item["chunk_type"] = "sliding"
+    return raw
+
+
+def _section_chunks(text: str, source: str, start_id: int) -> list[dict[str, Any]]:
+    lines = text.splitlines()
+    sections: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        if not current:
+            return
+        block = "\n".join(current).strip()
+        if len(block) > config.min_chunk_size:
+            sections.append(block)
+        current.clear()
+
+    for line in lines:
+        if _SECTION_RE.match(line.strip()) and current:
+            flush()
+        current.append(line)
+    flush()
+
+    if not sections and len(text.strip()) > config.min_chunk_size:
+        sections = [text.strip()]
+
+    chunks: list[dict[str, Any]] = []
+    for index, block in enumerate(sections):
+        if len(block) > config.chunk_size:
+            for part in doc_processor.split_chunks(block):
+                item = _chunk_dict(start_id + len(chunks), source, index + 1, part, "section")
+                if item:
+                    chunks.append(item)
+        else:
+            item = _chunk_dict(start_id + len(chunks), source, index + 1, block, "section")
+            if item:
+                chunks.append(item)
+        if len(chunks) >= config.max_chunks_per_doc:
+            break
     return chunks
 
 
-def build_section_chunks(files: Sequence[Path], start_id: int) -> list[dict]:
-    """One chunk per document section (numbered headings, tables)."""
-    chunks: list[dict] = []
-    chunk_id = start_id
-    for source_file in files:
-        raw = preprocess_text(source_file.read_text(encoding="utf-8"), PreprocessProfile.NORMALIZED)
-        section_count = 0
-        for page_num, (title, body) in enumerate(split_sections(raw), start=1):
-            if len(body.strip()) < config.min_chunk_size:
-                continue
-            text = body if len(body) <= config.max_text_length else body[: config.max_text_length]
-            chunks.append(
-                _make_chunk(
-                    chunk_id=chunk_id,
-                    source=source_file.name,
-                    page=page_num,
-                    body=text,
-                    chunk_type="section",
-                    section=title,
-                    profile=PreprocessProfile.MARKDOWN.value,
-                )
-            )
-            chunk_id += 1
-            section_count += 1
-        log.info("section chunks: source=%s count=%s", source_file.name, section_count)
-    return chunks
-
-
-def build_definition_chunks(files: Sequence[Path], start_id: int) -> list[dict]:
-    """Glossary / term-definition mini chunks."""
-    chunks: list[dict] = []
-    chunk_id = start_id
-    for source_file in files:
-        raw = preprocess_text(source_file.read_text(encoding="utf-8"), PreprocessProfile.BASELINE)
-        for item in extract_definition_lines(raw, source_file.name):
-            body = f"Термин: {item['term']}\nОпределение: {item['definition']}"
-            chunks.append(
-                _make_chunk(
-                    chunk_id=chunk_id,
-                    source=f"defs/{source_file.name}",
-                    page=1,
-                    body=body,
-                    chunk_type="definition",
-                    section=item["term"],
-                )
-            )
-            chunk_id += 1
-    log.info("definition chunks total=%s", len(chunks))
-    return chunks
-
-
-def build_lemma_hint_chunks(files: Sequence[Path], start_id: int) -> list[dict]:
-    """Chunks with SEARCH_HINTS suffix for better lexical overlap."""
-    chunks: list[dict] = []
-    chunk_id = start_id
-    for source_file in files:
-        hinted = preprocess_text(source_file.read_text(encoding="utf-8"), PreprocessProfile.LEMMA_HINT)
-        if len(hinted) < config.min_chunk_size:
+def _definition_chunks(text: str, source: str, start_id: int) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    for match in _DEFINITION_RE.finditer(text):
+        snippet = match.group(0).strip()
+        if len(snippet) > config.max_text_length:
+            snippet = snippet[: config.max_text_length]
+        if len(snippet) <= config.min_chunk_size:
             continue
-        if len(hinted) > config.max_text_length:
-            hinted = hinted[: config.max_text_length]
-        chunks.append(
-            _make_chunk(
-                chunk_id=chunk_id,
-                source=f"hints/{source_file.name}",
-                page=1,
-                body=hinted,
-                chunk_type="lemma_hint",
-                profile=PreprocessProfile.LEMMA_HINT.value,
-            )
-        )
-        chunk_id += 1
-    log.info("lemma_hint chunks total=%s", len(chunks))
-    return chunks
-
-
-def build_graph_chunks(files: Sequence[Path], start_id: int, graph_dir: Path) -> tuple[list[dict], int]:
-    triples = extract_graph_from_instruction_files(files)
-    if triples:
-        save_graph_artifacts(triples, graph_dir)
-    graph_chunks = triples_to_graph_chunks(triples, start_id=start_id)
-    for item in graph_chunks:
-        item["preprocess_profile"] = "graph"
-    log.info("graph chunks=%s triples=%s", len(graph_chunks), len(triples))
-    return graph_chunks, len(triples)
-
-
-def build_qa_chunks(instructions_dir: Path, start_id: int) -> list[dict]:
-    """Build Q&A chunks from instructions/graph/*/questions.txt + answer.txt."""
-    pairs = DatasetScanner(instructions_dir).scan_graph_qa_pairs()
-    chunks: list[dict] = []
-    chunk_id = start_id
-    for pair in pairs:
-        topic = pair.topic_dir.name
-        questions = [
-            line.strip()
-            for line in pair.questions_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-        answer = pair.answer_path.read_text(encoding="utf-8").strip()
-        for index, question in enumerate(questions, start=1):
-            body = f"Вопрос: {question}\nОтвет: {answer}"
-            chunks.append(
-                _make_chunk(
-                    chunk_id=chunk_id,
-                    source=f"qa/{topic}",
-                    page=index,
-                    body=body,
-                    chunk_type="qa",
-                    section=topic,
-                )
-            )
-            chunk_id += 1
-    log.info("qa chunks=%s pairs=%s", len(chunks), len(pairs))
+        item = _chunk_dict(start_id + len(chunks), source, 1, snippet, "definition")
+        if item:
+            chunks.append(item)
+        if len(chunks) >= config.max_chunks_per_doc:
+            break
     return chunks
 
 
@@ -207,46 +114,42 @@ def build_all_chunks(
     instructions_dir: Path,
     graph_dir: Path,
     *,
-    strategies: tuple[str, ...] | None = None,
-) -> list[dict]:
-    """Build chunks for all enabled strategies."""
-    enabled = strategies or config.chunk_strategies
-    all_chunks: list[dict] = []
+    strategies: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build chunk dictionaries using one or more chunking strategies."""
+    _ = graph_dir  # reserved for graph/RST strategies
+    active = tuple(strategies or DEFAULT_STRATEGIES)
+    all_chunks: list[dict[str, Any]] = []
+    seen_hashes: set[tuple[str, str]] = set()
     next_id = 0
 
-    if "sliding" in enabled:
-        sliding = build_sliding_chunks(files, next_id)
-        all_chunks.extend(sliding)
-        next_id += len(sliding)
+    for file_path in files:
+        if not file_path.is_file():
+            continue
+        source = _relative_source(file_path.resolve(), instructions_dir.resolve())
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except OSError as error:
+            log.warning("skip unreadable file=%s error=%s", file_path, error)
+            continue
 
-    if "section" in enabled:
-        sections = build_section_chunks(files, next_id)
-        all_chunks.extend(sections)
-        next_id += len(sections)
+        file_chunks: list[dict[str, Any]] = []
+        if "sliding" in active:
+            file_chunks.extend(_sliding_chunks(file_path, source, next_id))
+        if "section" in active:
+            file_chunks.extend(_section_chunks(text, source, next_id + len(file_chunks)))
+        if "definition" in active:
+            file_chunks.extend(_definition_chunks(text, source, next_id + len(file_chunks)))
 
-    if "definition" in enabled:
-        defs = build_definition_chunks(files, next_id)
-        all_chunks.extend(defs)
-        next_id += len(defs)
+        for chunk in file_chunks:
+            key = (str(chunk.get("source", source)), str(chunk.get("chunk_hash", "")))
+            if not chunk.get("chunk_hash") or key in seen_hashes:
+                continue
+            seen_hashes.add(key)
+            chunk["id"] = next_id
+            next_id += 1
+            all_chunks.append(chunk)
 
-    if "lemma_hint" in enabled:
-        hints = build_lemma_hint_chunks(files, next_id)
-        all_chunks.extend(hints)
-        next_id += len(hints)
+        log.info("chunked file=%s chunks=%s strategies=%s", source, len(file_chunks), active)
 
-    if "graph" in enabled:
-        graph_chunks, _ = build_graph_chunks(files, next_id, graph_dir)
-        all_chunks.extend(graph_chunks)
-        next_id += len(graph_chunks)
-
-    if "qa" in enabled:
-        qa = build_qa_chunks(instructions_dir, next_id)
-        all_chunks.extend(qa)
-        next_id += len(qa)
-
-    log.info(
-        "chunk pipeline done total=%s strategies=%s",
-        len(all_chunks),
-        ",".join(enabled),
-    )
     return all_chunks

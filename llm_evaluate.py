@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -55,10 +56,9 @@ def parse_first_json_block(response_text: str) -> dict[str, Any]:
         return {}
 
 
-def evaluate_answer_percent(question: str, answer: str) -> dict[str, Any]:
-    """Evaluate one answer in percent format."""
+def _judge_prompt(question: str, answer: str) -> str:
     short_answer = (answer or "")[:2000]
-    prompt = f"""You are an expert evaluator of RAG system answers. Rate the answer on a scale of 0-100%.
+    return f"""You are an expert evaluator of RAG system answers. Rate the answer on a scale of 0-100%.
 
 QUESTION: {question}
 
@@ -76,23 +76,101 @@ Example: {{"relevance": 85, "accuracy": 90, "completeness": 75, "clarity": 80, "
 Do NOT output any text outside the JSON.
 Do NOT use numbers below 0 or above 100.
 """
+
+
+def _normalize_judge_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    if not metrics:
+        return {"error": "Failed to parse", "total": 0.0}
+    for key in METRIC_KEYS:
+        if key in metrics:
+            metrics[key] = clamp_0_100(metrics[key])
+    return metrics
+
+
+def _empty_judge_result(reason: str = "empty answer") -> dict[str, Any]:
+    return {
+        "relevance": 0.0,
+        "accuracy": 0.0,
+        "completeness": 0.0,
+        "clarity": 0.0,
+        "total": 0.0,
+        "skipped": reason,
+    }
+
+
+def evaluate_answer_percent_openai(
+    question: str,
+    answer: str,
+    *,
+    model: str | None = None,
+    api_key: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate one answer with OpenAI judge (default: gpt-4o-mini)."""
+    if not (answer or "").strip():
+        return _empty_judge_result()
+
+    from dotenv import load_dotenv
+
+    load_dotenv(".env.rag", override=True)
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return {"error": "openai package not installed", "total": 0.0}
+
+    from config import Config
+
+    runtime = Config.from_env()
+    key = api_key or runtime.openai_api_key or os.getenv("OPENAI_API_KEY")
+    if not key or key.strip() == "user_provided":
+        return {"error": "OPENAI_API_KEY not configured", "total": 0.0}
+
+    judge_model = model or os.getenv("JUDGE_MODEL") or runtime.openai_model or "gpt-4o-mini"
+    client = OpenAI(api_key=key)
+    try:
+        response = client.chat.completions.create(
+            model=judge_model,
+            messages=[{"role": "user", "content": _judge_prompt(question, answer)}],
+            temperature=0.1,
+            max_tokens=300,
+        )
+    except Exception as error:
+        return {"error": str(error), "total": 0.0}
+
+    content = response.choices[0].message.content or ""
+    metrics = _normalize_judge_metrics(parse_first_json_block(content))
+    metrics["judge_model"] = judge_model
+    metrics["judge_backend"] = "openai"
+    usage = response.usage
+    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+    from core.cost_guard import CostGuard
+
+    metrics["judge_tokens"] = prompt_tokens + completion_tokens
+    metrics["judge_cost_usd"] = round(
+        CostGuard._estimate_cost(prompt_tokens, completion_tokens, judge_model),
+        6,
+    )
+    return metrics
+
+
+def evaluate_answer_percent(question: str, answer: str) -> dict[str, Any]:
+    """Evaluate one answer with local Ollama judge."""
+    if not (answer or "").strip():
+        return _empty_judge_result()
+
     try:
         response = ollama.chat(
             model=config.ollama_model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": _judge_prompt(question, answer)}],
             options={"temperature": 0.1, "num_predict": 300},
         )
     except (RuntimeError, OSError, ValueError) as error:
         return {"error": str(error), "total": 0.0}
 
     content = (response.get("message") or {}).get("content", "")
-    metrics = parse_first_json_block(content)
-    if not metrics:
-        return {"error": "Failed to parse", "total": 0.0}
-
-    for key in METRIC_KEYS:
-        if key in metrics:
-            metrics[key] = clamp_0_100(metrics[key])
+    metrics = _normalize_judge_metrics(parse_first_json_block(content))
+    metrics["judge_model"] = config.ollama_model
+    metrics["judge_backend"] = "ollama"
     return metrics
 
 

@@ -54,7 +54,7 @@ if [ "$USER_EXISTS" -gt 0 ]; then
     echo "✅ User ${LIBRECHAT_USER_EMAIL} already exists"
     echo "   Skipping user creation"
     echo ""
-    echo "🌐 LibreChat is ready at: http://localhost:${LIBRECHAT_PORT:-3080}"
+    echo "🌐 LibreChat is ready at: http://localhost:${LIBRECHAT_PORT:-3081}"
     echo ""
     exit 0
 fi
@@ -90,5 +90,5 @@ echo "   Email:    ${LIBRECHAT_USER_EMAIL}"
 echo "   Password: ${LIBRECHAT_USER_PASSWORD}"
 echo "   Role:     ADMIN"
 echo ""
-echo "🌐 LibreChat is ready at: http://localhost:${LIBRECHAT_PORT:-3080}"
+echo "🌐 LibreChat is ready at: http://localhost:${LIBRECHAT_PORT:-3081}"
 echo ""

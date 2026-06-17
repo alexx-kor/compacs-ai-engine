@@ -10,7 +10,9 @@ from functools import lru_cache
 from config import Config
 from core.embeddings.providers import (
     EmbeddingProvider,
+    FALLBACK_EMBEDDING_SIZE,
     OllamaEmbeddingProvider,
+    OpenAIEmbeddingProvider,
     build_embedding_provider,
 )
 
@@ -26,7 +28,6 @@ class EmbeddingChain:
         self._fallback: EmbeddingProvider | None = None
         if config.embedding_fallback_enabled and self._primary.name != "ollama":
             self._fallback = OllamaEmbeddingProvider(config)
-        self._vector_dim = self._primary.embedding_dim
 
     @property
     def active_provider(self) -> str:
@@ -35,31 +36,18 @@ class EmbeddingChain:
     def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
-        results: list[list[float]] = []
-        for index, text in enumerate(texts):
-            try:
-                vector = self._primary.embed_batch([text])[0]
-            except Exception as error:
-                if self._fallback is not None:
-                    log.warning(
-                        "Primary embedding provider=%s failed item=%s, fallback ollama: %s",
-                        self._primary.name,
-                        index,
-                        error,
-                    )
-                    vector = self._fallback.embed_batch([text])[0]
-                else:
-                    log.warning(
-                        "Embedding failed item=%s, zero vector dim=%s: %s",
-                        index,
-                        self._vector_dim,
-                        error,
-                    )
-                    vector = [0.0] * self._vector_dim
-            if len(vector) != self._vector_dim:
-                self._vector_dim = len(vector)
-            results.append(vector)
-        return results
+        try:
+            return self._primary.embed_batch(texts)
+        except Exception as error:
+            if self._fallback is None:
+                log.warning("Embedding provider failed, returning zero vectors: %s", error)
+                return [[0.0] * FALLBACK_EMBEDDING_SIZE for _ in texts]
+            log.warning(
+                "Primary embedding provider=%s failed, falling back to ollama: %s",
+                self._primary.name,
+                error,
+            )
+            return self._fallback.embed_batch(texts)
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed texts using configured batch size."""

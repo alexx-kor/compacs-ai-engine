@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +24,6 @@ class JsonVectorStore(VectorStore):
         self._store_dir = Path(config.local_vector_store_dir)
         self._store_path = self._store_dir / "chunks.json"
         self._rows: list[ChunkRecord] = []
-        self._embedding_dim: int | None = None
-        self._embedding_provider: str | None = None
         self._load_from_disk()
 
     @property
@@ -48,13 +44,15 @@ class JsonVectorStore(VectorStore):
         query_embedding: np.ndarray,
         limit: int,
         similarity_threshold: float,
+        source_prefixes: list[str] | None = None,
     ) -> list[ChunkRecord]:
         if limit <= 0:
             raise ValueError(f"limit must be positive, got {limit}")
-        query_dim = int(query_embedding.shape[0])
         scored: list[tuple[float, ChunkRecord]] = []
         for record in self._rows:
-            if int(record.embedding.shape[0]) != query_dim:
+            if source_prefixes and not any(
+                record.source.startswith(prefix) for prefix in source_prefixes
+            ):
                 continue
             distance = cosine_distance(query_embedding.tolist(), record.embedding.tolist())
             if distance >= similarity_threshold:
@@ -66,18 +64,6 @@ class JsonVectorStore(VectorStore):
     def insert_batch(self, chunks: list[ChunkRecord]) -> int:
         if not chunks:
             raise ValueError("chunks list must not be empty")
-        if self._rows:
-            expected_dim = int(self._rows[0].embedding.shape[0])
-            mismatched = [
-                chunk.id
-                for chunk in chunks
-                if int(chunk.embedding.shape[0]) != expected_dim
-            ]
-            if mismatched:
-                raise ValueError(
-                    f"embedding dimension mismatch on insert: expected={expected_dim} "
-                    f"ids={mismatched[:5]}. Re-index with --force-recreate."
-                )
         self._rows.extend(chunks)
         self._atomic_write()
         log.info("Inserted chunks count=%s backend=json", len(chunks))
@@ -86,6 +72,14 @@ class JsonVectorStore(VectorStore):
     def delete_by_source(self, source: str) -> int:
         before = len(self._rows)
         self._rows = [row for row in self._rows if row.source != source]
+        removed = before - len(self._rows)
+        if removed:
+            self._atomic_write()
+        return removed
+
+    def delete_by_source_prefix(self, prefix: str) -> int:
+        before = len(self._rows)
+        self._rows = [row for row in self._rows if not row.source.startswith(prefix)]
         removed = before - len(self._rows)
         if removed:
             self._atomic_write()
@@ -112,60 +106,19 @@ class JsonVectorStore(VectorStore):
             return
         if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
             return
-        dim = payload.get("embedding_dim")
-        if isinstance(dim, int):
-            self._embedding_dim = dim
-        provider = payload.get("embedding_provider")
-        if isinstance(provider, str):
-            self._embedding_provider = provider
         rows: list[ChunkRecord] = []
         for raw in payload["rows"]:
             if not isinstance(raw, dict):
                 continue
             rows.append(self._row_to_record(raw))
         self._rows = rows
-        self._sanitize_embedding_dimensions(persist=True)
-
-    def _sanitize_embedding_dimensions(self, *, persist: bool) -> None:
-        """Drop orphan rows whose embedding size differs from the index majority."""
-        if not self._rows:
-            return
-        dim_counts = Counter(int(record.embedding.shape[0]) for record in self._rows)
-        if len(dim_counts) == 1:
-            self._embedding_dim = next(iter(dim_counts))
-            return
-
-        target_dim, keep_count = dim_counts.most_common(1)[0]
-        before = len(self._rows)
-        self._rows = [
-            record for record in self._rows if int(record.embedding.shape[0]) == target_dim
-        ]
-        removed = before - len(self._rows)
-        self._embedding_dim = target_dim
-        log.warning(
-            "removed %s/%s chunks with non-dominant embedding dims %s (kept dim=%s)",
-            removed,
-            before,
-            dict(dim_counts),
-            target_dim,
-        )
-        if persist and removed:
-            self._atomic_write()
 
     def _atomic_write(self) -> None:
         tmp_path = self._store_path.with_suffix(".json.tmp")
-        if self._rows:
-            self._embedding_dim = int(self._rows[0].embedding.shape[0])
-            self._embedding_provider = os.getenv("EMBEDDING_PROVIDER", self._embedding_provider)
-        payload: dict[str, Any] = {
-            "version": 1,
-            "rows": [self._record_to_row(record) for record in self._rows],
-        }
-        if self._embedding_dim is not None:
-            payload["embedding_dim"] = self._embedding_dim
-        if self._embedding_provider:
-            payload["embedding_provider"] = self._embedding_provider
-        body = json.dumps(payload, ensure_ascii=False)
+        body = json.dumps(
+            {"version": 1, "rows": [self._record_to_row(record) for record in self._rows]},
+            ensure_ascii=False,
+        )
         tmp_path.write_text(body, encoding="utf-8")
         tmp_path.replace(self._store_path)
 

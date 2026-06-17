@@ -50,7 +50,6 @@ class Config:
     ollama_host: str
     ollama_model: str
     embed_model: str
-    ollama_embed_max_chars: int
 
     chunk_size: int
     chunk_overlap: int
@@ -70,16 +69,6 @@ class Config:
 
     cache_enabled: bool
     cache_ttl: int
-
-    chunk_strategies: tuple[str, ...]
-    hybrid_search_enabled: bool
-    hybrid_dense_weight: float
-    hybrid_bm25_weight: float
-    rerank_lemmatize: bool
-    bm25_lemmatize: bool
-
-    compacs_api_key: str | None
-    compacs_models: tuple[str, ...]
 
     @classmethod
     def from_env(cls) -> Config:
@@ -116,17 +105,16 @@ class Config:
             openai_embedding_model=os.getenv(
                 "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
             ),
-            openai_max_tokens=int(os.getenv("MAX_TOKENS", "1000")),
+            openai_max_tokens=int(os.getenv("MAX_TOKENS", "800")),
             openai_max_requests_per_min=int(os.getenv("OPENAI_MAX_REQUESTS_PER_MIN", "60")),
             openai_daily_budget_usd=float(os.getenv("OPENAI_DAILY_BUDGET_USD", "10.0")),
             ollama_host=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"),
             ollama_model=os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2:3b")),
             embed_model=os.getenv("EMBED_MODEL", "nomic-embed-text"),
-            ollama_embed_max_chars=int(os.getenv("OLLAMA_EMBED_MAX_CHARS", "1800")),
             chunk_size=int(os.getenv("CHUNK_SIZE", "1000")),
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "150")),
-            top_k=int(os.getenv("TOP_K", "12")),
-            rerank_top_k=int(os.getenv("RERANK_TOP_K", "5")),
+            top_k=int(os.getenv("TOP_K", "8")),
+            rerank_top_k=int(os.getenv("RERANK_TOP_K", "3")),
             similarity_threshold=float(os.getenv("SIMILARITY_THRESHOLD", "0.35")),
             batch_size=int(os.getenv("BATCH_SIZE", "32")),
             max_text_length=int(os.getenv("MAX_TEXT_LENGTH", "3072")),
@@ -139,22 +127,6 @@ class Config:
             repeat_penalty=float(os.getenv("REPEAT_PENALTY", "1.1")),
             cache_enabled=os.getenv("CACHE_ENABLED", "true").lower() == "true",
             cache_ttl=int(os.getenv("CACHE_TTL", "3600")),
-            chunk_strategies=_parse_chunk_strategies(
-                os.getenv(
-                    "CHUNK_STRATEGIES",
-                    "sliding,section,graph,qa,definition",
-                )
-            ),
-            hybrid_search_enabled=os.getenv("HYBRID_SEARCH_ENABLED", "true").lower()
-            == "true",
-            hybrid_dense_weight=float(os.getenv("HYBRID_DENSE_WEIGHT", "0.65")),
-            hybrid_bm25_weight=float(os.getenv("HYBRID_BM25_WEIGHT", "0.35")),
-            rerank_lemmatize=os.getenv("RERANK_LEMMATIZE", "true").lower() == "true",
-            bm25_lemmatize=os.getenv("BM25_LEMMATIZE", "true").lower() == "true",
-            compacs_api_key=os.getenv("COMPACS_API_KEY") or os.getenv("RAG_API_KEY"),
-            compacs_models=_parse_compacs_models(
-                os.getenv("COMPACS_MODELS", "compacs-rag")
-            ),
         )
 
     def __post_init__(self) -> None:
@@ -184,6 +156,13 @@ class Config:
         return str(self.instructions_dir / "raw")
 
 
+def _openai_key_configured(key: str | None) -> bool:
+    if not key or not str(key).strip():
+        return False
+    normalized = str(key).strip().lower()
+    return normalized not in {"user_provided", "changeme", "none", "null"}
+
+
 def _parse_storage_backend(value: str) -> StorageBackend:
     normalized = value.lower().strip()
     if normalized in ("clickhouse", "json", "auto"):
@@ -198,29 +177,11 @@ def _parse_llm_provider(value: str) -> LLMProvider:
     raise ValueError(f"invalid LLM_PROVIDER: {value}")
 
 
-def _parse_chunk_strategies(value: str) -> tuple[str, ...]:
-    allowed = {"sliding", "section", "definition", "lemma_hint", "graph", "qa"}
-    parts = tuple(item.strip().lower() for item in value.split(",") if item.strip())
-    if not parts:
-        raise ValueError("CHUNK_STRATEGIES must list at least one strategy")
-    unknown = [item for item in parts if item not in allowed]
-    if unknown:
-        raise ValueError(f"unknown CHUNK_STRATEGIES: {unknown}")
-    return parts
-
-
 def _parse_embedding_provider(value: str) -> EmbeddingProvider:
     normalized = value.lower().strip()
     if normalized in ("openai", "ollama", "auto"):
         return normalized  # type: ignore[return-value]
     raise ValueError(f"invalid EMBEDDING_PROVIDER: {value}")
-
-
-def _parse_compacs_models(value: str) -> tuple[str, ...]:
-    parts = tuple(item.strip() for item in value.split(",") if item.strip())
-    if not parts:
-        raise ValueError("COMPACS_MODELS must list at least one model id")
-    return parts
 
 
 config = Config.from_env()
