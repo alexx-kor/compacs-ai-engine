@@ -85,9 +85,8 @@ answers_*/
 # Excel comparison reports (regenerable)
 *.xlsx
 
-# Baseline: код и golden в git, прогоны — нет
-baseline/rag_answers_gpu.json
-baseline/evaluation_*.json
+# Baseline: код и эталон в git, артефакты прогонов — нет
+baseline/rag_answers_gpu.jsonbaseline/evaluation_*.json
 baseline/llm_judge_scores.json
 baseline/llm_judge_run.log
 baseline/baseline_comparison.xlsx
