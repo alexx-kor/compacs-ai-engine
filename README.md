@@ -2,11 +2,13 @@
 
 Серверный RAG-стенд КОМПАКС® 7: ingestion, hybrid search, Ollama/OpenAI, единая точка входа `:3080`.
 
-Спецификация: [`docs/TECHNICAL_NOTE_V2.md`](docs/TECHNICAL_NOTE_V2.md) · API: [`docs/RAG_V2_API.md`](docs/RAG_V2_API.md)
+Спецификация: [`docs/TECHNICAL_NOTE_V2.md`](docs/TECHNICAL_NOTE_V2.md) · API: [`docs/RAG_V2_API.md`](docs/RAG_V2_API.md) · Контроллер: [`docs/CONTROLLER_PATTERN.md`](docs/CONTROLLER_PATTERN.md)
 
 ---
 
 ## 1. Развёртывание (Docker)
+
+### Полный стек (Ollama в контейнере)
 
 ```bash
 cp .env.rag.docker.example .env.rag
@@ -16,6 +18,19 @@ docker compose -f rag-compose.yml up -d --build
 docker compose -f rag-compose.yml exec ollama ollama pull nomic-embed-text
 docker compose -f rag-compose.yml exec ollama ollama pull llama3.2:3b
 ```
+
+### Ollama на хосте (без ~2 GB pull образа ollama/ollama)
+
+```bash
+ollama serve
+ollama pull llama3.2:3b && ollama pull nomic-embed-text
+ollama run llama3.2:3b "ok"
+
+cp .env.rag.docker.example .env.rag
+docker compose -f rag-compose.host-ollama.yml up -d --build
+```
+
+Локальный индекс `data/vectors/` монтируется в engine автоматически.
 
 | Сервис | URL |
 |--------|-----|
@@ -40,6 +55,41 @@ python -m uvicorn api.stable:app_stable --host 127.0.0.1 --port 8080
 ```
 
 LibreChat (опционально, порт **3081**): `docker compose -f librechat-compose.yml up -d`
+
+### Ollama: таймауты и «холодная» модель
+
+На CPU/GPU с `llama3.2:3b` первый запрос может тратить **~50 с** на загрузку модели в RAM, если Ollama её выгрузил. Большой RAG-промпт (много чанков) + генерация легко превышают **120 с** — gateway обрывает запрос, источники уже есть, ответ пустой.
+
+**Рекомендуемые переменные** (см. `.env.rag.docker.example`):
+
+| Переменная | Значение | Зачем |
+|------------|----------|--------|
+| `GATEWAY_TIMEOUT` | `300` | Gunicorn + httpx proxy к engine |
+| `OLLAMA_KEEP_ALIVE` | `30m` | не выгружать модель между запросами |
+| `OLLAMA_CLIENT_TIMEOUT` | `300` | таймаут Python-клиента к Ollama |
+| `NUM_CTX` | `8192` | контекстное окно модели |
+| `NUM_PREDICT` / `MAX_TOKENS` | `400` / `600` | лимит генерации |
+| `RERANK_TOP_K` | `3` | меньше текста в промпте |
+| `OLLAMA_CHUNK_CHARS` | `350` | обрезка чанка для Ollama |
+
+**Прогрев после старта:**
+```bash
+ollama run llama3.2:3b "ok"
+# или в Docker:
+docker compose -f rag-compose.yml exec ollama ollama run llama3.2:3b "ok"
+```
+
+**Диагностика** (подставьте реальный промпт, не плейсхолдер):
+```powershell
+$body = @{
+  model = "llama3.2:3b"
+  prompt = "Кратко: что такое HTTP-прокси?"
+  stream = $false
+  options = @{ num_ctx = 8192; num_predict = 400 }
+} | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri http://localhost:11434/api/generate -Method Post -Body $body -ContentType "application/json"
+```
+Смотрите `load_duration` (холодная загрузка) vs `eval_duration` (генерация).
 
 ---
 

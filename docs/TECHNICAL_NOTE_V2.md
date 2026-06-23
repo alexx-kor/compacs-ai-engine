@@ -82,9 +82,11 @@ gunicorn wsgi:app -c gunicorn.conf.py
 python -m uvicorn api.stable:app_stable --host 127.0.0.1 --port 8080
 ```
 
-`GATEWAY_TIMEOUT=120` — запас под ingestion/инференс. При росте нагрузки — очередь для `/load` (см. §9).
+`GATEWAY_TIMEOUT=300` — запас под cold-load Ollama + RAG prefill/генерацию; для `llama3.2:3b` на CPU не ставьте 120. `OLLAMA_KEEP_ALIVE=30m` держит модель в RAM. При росте нагрузки — очередь для `/load` (см. §9).
 
-**Импорт существующего индекса:** смонтировать том `rag_data` или скопировать `data/vectors/chunks.json` в volume.
+**Импорт существующего индекса:** смонтировать том `rag_data` или скопировать `data/vectors/chunks.json` в volume. Для **host-ollama** compose используется bind-mount `./data`.
+
+**Паттерн контроллера (два стрима):** [`docs/CONTROLLER_PATTERN.md`](./CONTROLLER_PATTERN.md) — фоновый `/load` vs быстрый `/v1/query`, чеклист ручной проверки.
 
 ---
 

@@ -38,9 +38,21 @@ class Runner:
     api_key: str
     pro_key: str
     skip_slow: bool
+    gateway_only: bool = False
+    engine_direct: bool = True
     results: list[CheckResult] = field(default_factory=list)
     _source_id: str | None = None
     _job_id: str | None = None
+
+    def _probe_engine(self) -> bool:
+        try:
+            with self._client(self.engine, 3.0) as client:
+                return client.get("/health").status_code == 200
+        except (httpx.ConnectError, httpx.TimeoutException):
+            return False
+
+    def _engine_base(self) -> str:
+        return self.engine if self.engine_direct else self.gateway
 
     def record(
         self,
@@ -64,12 +76,25 @@ class Runner:
     def check_health(self) -> None:
         with self._client(self.gateway, 15.0) as client:
             r = client.get("/health")
-            ok = r.status_code == 200 and r.json().get("status") == "healthy"
-            self.record("gateway", "GET", "/health", r.status_code, ok, str(r.json())[:120])
-        with self._client(self.engine, 15.0) as client:
-            r = client.get("/health")
-            ok = r.status_code == 200 and r.json().get("status") == "healthy"
-            self.record("engine", "GET", "/health", r.status_code, ok, str(r.json())[:120])
+            body = r.json() if r.status_code == 200 else {}
+            ok = r.status_code == 200 and body.get("status") == "healthy"
+            self.record("gateway", "GET", "/health", r.status_code, ok, str(body)[:120])
+            if self.engine_direct:
+                with self._client(self.engine, 15.0) as eng:
+                    r2 = eng.get("/health")
+                    ok2 = r2.status_code == 200 and r2.json().get("status") == "healthy"
+                    self.record("engine", "GET", "/health", r2.status_code, ok2, str(r2.json())[:120])
+            else:
+                engine = body.get("engine", {})
+                ok2 = engine.get("status") == "healthy"
+                self.record(
+                    "engine",
+                    "GET",
+                    "/health (via gateway)",
+                    r.status_code,
+                    ok2,
+                    str(engine)[:120],
+                )
 
     def check_ui_pages(self) -> None:
         pages = [
@@ -305,7 +330,8 @@ class Runner:
 
     def check_openai_compat(self) -> None:
         headers = self._auth_headers()
-        with self._client(self.engine, 180.0) as client:
+        base = self._engine_base()
+        with self._client(base, 180.0) as client:
             r = client.get("/v1/models", headers=headers)
             ok = r.status_code in (200, 401)
             if self.api_key:
@@ -349,8 +375,9 @@ class Runner:
                     )
 
     def check_engine_direct(self) -> None:
-        """Routes exposed on engine :8080 (not all proxied via gateway UI paths)."""
-        with self._client(self.engine, 60.0) as client:
+        """Routes on engine :8080; proxied via gateway /v1/* when engine is internal."""
+        base = self._engine_base()
+        with self._client(base, 60.0) as client:
             r = client.get("/v1/metrics")
             ok = r.status_code == 200 and "quality" in r.json()
             self.record("engine", "GET", "/v1/metrics", r.status_code, ok)
@@ -359,18 +386,30 @@ class Runner:
             ok = r.status_code == 200 and len(r.content) > 100
             self.record("engine", "GET", "/v1/export", r.status_code, ok, f"bytes={len(r.content)}")
 
-            r = client.get("/sources")
-            ok = r.status_code == 200 and "sources" in r.json()
-            self.record("engine", "GET", "/sources", r.status_code, ok)
+            sources_path = "/sources?format=json" if not self.engine_direct else "/sources"
+            r = client.get("/sources", params={"format": "json"} if not self.engine_direct else None)
+            data = r.json() if r.status_code == 200 else {}
+            ok = r.status_code == 200 and "sources" in data
+            self.record("engine", "GET", sources_path, r.status_code, ok)
 
             r = client.get("/v1/jobs/nonexistent-job-id")
             self.record("engine", "GET", "/v1/jobs/{id} (404)", r.status_code, r.status_code == 404)
 
     def check_license_upgrade(self) -> None:
-        with self._client(self.engine, 15.0) as client:
-            r = client.get("/license")
-            ok = r.status_code == 200 and "tier" in r.json()
-            self.record("engine", "GET", "/license", r.status_code, ok, r.json().get("tier", ""))
+        if self.engine_direct:
+            with self._client(self.engine, 15.0) as client:
+                r = client.get("/license")
+                ok = r.status_code == 200 and "tier" in r.json()
+                self.record("engine", "GET", "/license", r.status_code, ok, r.json().get("tier", ""))
+        else:
+            self.record(
+                "engine",
+                "GET",
+                "/license",
+                "skip",
+                True,
+                "engine internal only (use bare-metal or publish :8080)",
+            )
 
         with self._client(self.gateway, 15.0) as client:
             r = client.post("/upgrade", json={"license_key": "invalid-key"})
@@ -422,6 +461,9 @@ class Runner:
     def run(self) -> int:
         print(f"Gateway: {self.gateway}")
         print(f"Engine:  {self.engine}")
+        self.engine_direct = not self.gateway_only and self._probe_engine()
+        if not self.engine_direct:
+            print("Note: engine not reachable on host; API checks go through gateway.")
         print()
 
         self.check_health()
@@ -464,6 +506,12 @@ def main() -> int:
     parser.add_argument("--api-key", default=os.getenv("COMPACS_API_KEY", ""))
     parser.add_argument("--pro-key", default=os.getenv("COMPACS_PRO_KEY", ""))
     parser.add_argument(
+        "--gateway-only",
+        action="store_true",
+        default=os.getenv("RAG_SKIP_ENGINE", "").lower() in ("1", "true", "yes"),
+        help="Skip direct engine :8080 checks (Docker host-ollama: engine is internal)",
+    )
+    parser.add_argument(
         "--skip-slow",
         action="store_true",
         help="Skip streaming endpoints (SSE) to save time",
@@ -477,6 +525,7 @@ def main() -> int:
         api_key=args.api_key.strip(),
         pro_key=args.pro_key.strip(),
         skip_slow=args.skip_slow,
+        gateway_only=args.gateway_only,
     )
     code = runner.run()
     if args.json:

@@ -1,21 +1,18 @@
-# COMPACS RAG v2 — production Docker stand
-# Gateway :3080 (public) · Engine :8080 (internal) · Ollama
+# RAG v2 without ollama/ollama image (~2 GB pull).
+# Ollama must run on the host: ollama serve + ollama pull llama3.2:3b nomic-embed-text
+#
+# Windows + Docker: Ollama must listen on 0.0.0.0 (not only 127.0.0.1):
+#   powershell -ExecutionPolicy Bypass -File scripts/setup-ollama-docker-windows.ps1
+#
+#   docker compose -f rag-compose.host-ollama.yml up -d --build
+#   RAG_GATEWAY_PORT=3090 docker compose -f rag-compose.host-ollama.yml up -d   # if :3080 busy
+#
+# Ping from host:
+#   curl http://localhost:3090/health
+#   curl http://localhost:11434/api/tags
+# Engine is internal only (rag-engine:8080); use gateway from host.
 
 services:
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    volumes:
-      - ollama_models:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
-
   rag-engine:
     build:
       context: .
@@ -34,20 +31,23 @@ services:
     env_file:
       - .env.rag
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: http://host.docker.internal:11434
       STORAGE_BACKEND: ${STORAGE_BACKEND:-json}
       LOCAL_VECTOR_STORE_DIR: /app/data/vectors
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
       LLM_FALLBACK_ENABLED: "false"
       EMBEDDING_FALLBACK_ENABLED: "false"
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      GATEWAY_TIMEOUT: ${GATEWAY_TIMEOUT:-300}
+      OLLAMA_CLIENT_TIMEOUT: ${OLLAMA_CLIENT_TIMEOUT:-300}
+      COMPACS_API_KEY: ${COMPACS_API_KEY:-compacs-local-dev-key}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - rag_data:/app/data
+      - ./data:/app/data
     expose:
       - "8080"
-    depends_on:
-      ollama:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health"]
       interval: 15s
@@ -84,7 +84,3 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
-
-volumes:
-  ollama_models:
-  rag_data:
