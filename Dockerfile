@@ -18,7 +18,6 @@ COPY router ./router
 COPY prompts ./prompts
 COPY scripts ./scripts
 COPY docs ./docs
-COPY baseline ./baseline
 
 RUN pip install --upgrade pip \
     && pip install -e .

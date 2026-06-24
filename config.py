@@ -49,6 +49,10 @@ class Config:
 
     ollama_host: str
     ollama_model: str
+    ollama_keep_alive: str
+    ollama_client_timeout: float
+    ollama_context_chunks: int
+    ollama_chunk_chars: int
     embed_model: str
 
     chunk_size: int
@@ -110,6 +114,15 @@ class Config:
             openai_daily_budget_usd=float(os.getenv("OPENAI_DAILY_BUDGET_USD", "10.0")),
             ollama_host=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"),
             ollama_model=os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2:3b")),
+            ollama_keep_alive=os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+            ollama_client_timeout=float(
+                os.getenv(
+                    "OLLAMA_CLIENT_TIMEOUT",
+                    os.getenv("GATEWAY_TIMEOUT", "300"),
+                )
+            ),
+            ollama_context_chunks=int(os.getenv("OLLAMA_CONTEXT_CHUNKS", "3")),
+            ollama_chunk_chars=int(os.getenv("OLLAMA_CHUNK_CHARS", "350")),
             embed_model=os.getenv("EMBED_MODEL", "nomic-embed-text"),
             chunk_size=int(os.getenv("CHUNK_SIZE", "1000")),
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "150")),

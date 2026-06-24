@@ -16,6 +16,21 @@ from core.openai_client import get_openai_client
 log = logging.getLogger(__name__)
 
 
+def _ollama_chat_content(message: Any) -> str:
+    """Extract assistant text from ollama dict or pydantic Message."""
+    if message is None:
+        return ""
+    if isinstance(message, dict):
+        return str(message.get("content", "") or "")
+    return str(getattr(message, "content", "") or "")
+
+
+def _ollama_response_message(response: Any) -> Any:
+    if isinstance(response, dict):
+        return response.get("message")
+    return getattr(response, "message", None)
+
+
 class CompletionProvider(ABC):
     """Abstract chat completion provider."""
 
@@ -94,26 +109,32 @@ class OllamaCompletionProvider(CompletionProvider):
 
     def __init__(self, config: Config) -> None:
         self._config = config
-        self._client = ollama.Client(host=config.ollama_host)
+        self._client = ollama.Client(
+            host=config.ollama_host,
+            timeout=config.ollama_client_timeout,
+        )
 
     @property
     def name(self) -> str:
         return "ollama"
 
+    def _chat_options(self, temperature: float, max_tokens: int) -> dict[str, Any]:
+        return {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+            "num_ctx": self._config.num_ctx,
+            "top_p": self._config.top_p,
+            "repeat_penalty": self._config.repeat_penalty,
+        }
+
     def complete(self, messages: list[dict[str, str]], temperature: float, max_tokens: int) -> str:
         response = self._client.chat(
             model=self._config.ollama_model,
             messages=messages,
-            options={
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                "top_p": self._config.top_p,
-            },
+            keep_alive=self._config.ollama_keep_alive,
+            options=self._chat_options(temperature, max_tokens),
         )
-        message = response.get("message", {})
-        if isinstance(message, dict):
-            return str(message.get("content", ""))
-        return ""
+        return _ollama_chat_content(_ollama_response_message(response))
 
     def stream_complete(
         self,
@@ -125,18 +146,13 @@ class OllamaCompletionProvider(CompletionProvider):
             model=self._config.ollama_model,
             messages=messages,
             stream=True,
-            options={
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                "top_p": self._config.top_p,
-            },
+            keep_alive=self._config.ollama_keep_alive,
+            options=self._chat_options(temperature, max_tokens),
         )
         for chunk in stream:
-            message = chunk.get("message", {})
-            if isinstance(message, dict):
-                content = message.get("content")
-                if content:
-                    yield str(content)
+            content = _ollama_chat_content(_ollama_response_message(chunk))
+            if content:
+                yield content
 
 
 def build_completion_provider(config: Config, cost_guard: CostGuard) -> CompletionProvider:

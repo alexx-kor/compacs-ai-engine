@@ -13,6 +13,7 @@ from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 ENGINE_URL = os.getenv("RAG_ENGINE_URL", "http://127.0.0.1:8080").rstrip("/")
+GATEWAY_TIMEOUT = float(os.getenv("GATEWAY_TIMEOUT", "300"))
 
 _NAV = """
 <nav>
@@ -36,6 +37,10 @@ _BASE_STYLE = """
   button { background: #1d4ed8; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
   button.danger { background: #dc2626; }
   pre { white-space: pre-wrap; background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; }
+  pre.error { background: #7f1d1d; color: #fecaca; }
+  pre.ok { background: #14532d; color: #bbf7d0; }
+  pre.warn { background: #78350f; color: #fde68a; }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
   .muted { color: #64748b; font-size: 14px; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   table { width: 100%; border-collapse: collapse; }
@@ -54,7 +59,7 @@ def _page(title: str, body: str) -> str:
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    _app.state.http = httpx.AsyncClient(base_url=ENGINE_URL, timeout=120.0)
+    _app.state.http = httpx.AsyncClient(base_url=ENGINE_URL, timeout=GATEWAY_TIMEOUT)
     yield
     await _app.state.http.aclose()
 
@@ -134,13 +139,15 @@ async def chat_page() -> HTMLResponse:
 </div>
 <div class="card" id="load">
 <h2>Загрузка документов</h2>
-<p class="muted">POST /load — ingestion и переиндексация в выбранную папку.</p>
+<p class="muted">Форматы: PDF, TXT, MD, RST. ZIP не поддерживается — распакуйте и загрузите файлы по одному.</p>
 <div class="row">
   <div>
     <h3>Новая папка</h3>
-    <input id="newId" placeholder="id (ops-manual)">
-    <input id="newName" placeholder="Название">
-    <button id="createFolder">Создать</button>
+    <label for="newId">ID (латиница, ops-manual)</label>
+    <input id="newId" placeholder="ops-manual">
+    <label for="newName">Название</label>
+    <input id="newName" placeholder="Операторская документация">
+    <button id="createFolder">Создать папку</button>
   </div>
   <div>
     <h3>Выбор папок для RAG</h3>
@@ -148,20 +155,41 @@ async def chat_page() -> HTMLResponse:
     <button id="saveSelection">Применить выбор</button>
   </div>
 </div>
+<label for="uploadFolder">Папка для загрузки</label>
 <select id="uploadFolder"></select>
-<input id="file" type="file" accept=".pdf,.txt,.md,.rst">
-<button id="uploadBtn">Загрузить (POST /load)</button>
-<pre id="loadLog"></pre>
+<label for="file">Файл</label>
+<input id="file" type="file" accept=".pdf,.txt,.md,.rst,application/pdf,text/plain,text/markdown">
+<button id="uploadBtn">Загрузить</button>
+<pre id="loadLog">1) Создайте папку → 2) выберите её выше → 3) прикрепите файл → 4) Загрузить. Статус и ошибки — здесь.</pre>
 </div>
 <script>
+const ALLOWED_EXT = ['.pdf', '.txt', '.md', '.rst'];
+function setLoadLog(text, tone) {
+  const el = document.getElementById('loadLog');
+  el.textContent = text;
+  el.className = tone || '';
+}
+function fileExtension(name) {
+  const i = name.lastIndexOf('.');
+  return i >= 0 ? name.slice(i).toLowerCase() : '';
+}
 async function refreshCollections() {
   const res = await fetch('/v1/collections');
   const data = await res.json();
   const selected = new Set(data.selected_collection_ids || []);
   const sel = document.getElementById('selection');
   const upload = document.getElementById('uploadFolder');
+  const prevUpload = upload.value;
   sel.innerHTML = '';
   upload.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = (data.collections || []).length
+    ? '— выберите папку —'
+    : '— сначала создайте папку —';
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  upload.appendChild(placeholder);
   for (const c of data.collections || []) {
     const opt = document.createElement('option');
     opt.value = c.id;
@@ -169,6 +197,9 @@ async function refreshCollections() {
     opt.selected = selected.has(c.id);
     sel.appendChild(opt);
     upload.appendChild(opt.cloneNode(true));
+  }
+  if (prevUpload && (data.collections || []).some(c => c.id === prevUpload)) {
+    upload.value = prevUpload;
   }
 }
 document.getElementById('ask').onclick = async () => {
@@ -217,36 +248,121 @@ document.getElementById('ask').onclick = async () => {
 document.getElementById('createFolder').onclick = async () => {
   const id = document.getElementById('newId').value.trim();
   const name = document.getElementById('newName').value.trim();
-  const res = await fetch('/v1/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id || undefined, name: name || id }) });
-  document.getElementById('loadLog').textContent = JSON.stringify(await res.json(), null, 2);
+  const label = name || id;
+  if (!label) {
+    setLoadLog('Ошибка: укажите ID или название папки.', 'error');
+    return;
+  }
+  const res = await fetch('/v1/collections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id || undefined, name: label }),
+  });
+  let data;
+  try { data = await res.json(); } catch (_) {
+    setLoadLog('Ошибка создания папки: ' + res.status + ' ' + res.statusText, 'error');
+    return;
+  }
+  if (!res.ok) {
+    setLoadLog('Ошибка создания папки:\\n' + JSON.stringify(data, null, 2), 'error');
+    return;
+  }
+  setLoadLog('Папка создана: ' + data.id + '. Выберите файл и нажмите «Загрузить».', 'ok');
   await refreshCollections();
+  document.getElementById('uploadFolder').value = data.id;
 };
 document.getElementById('saveSelection').onclick = async () => {
   const ids = [...document.getElementById('selection').selectedOptions].map(o => o.value);
   const res = await fetch('/v1/collections/selection', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collection_ids: ids }) });
-  document.getElementById('loadLog').textContent = JSON.stringify(await res.json(), null, 2);
+  const data = await res.json();
+  setLoadLog(res.ok ? 'Выбор папок для RAG сохранён.' : JSON.stringify(data, null, 2), res.ok ? 'ok' : 'error');
 };
 document.getElementById('uploadBtn').onclick = async () => {
-  const file = document.getElementById('file').files[0];
+  const fileInput = document.getElementById('file');
+  const file = fileInput.files[0];
   const collectionId = document.getElementById('uploadFolder').value;
-  if (!file || !collectionId) return;
+  const btn = document.getElementById('uploadBtn');
+  if (!collectionId) {
+    setLoadLog('Ошибка: выберите папку для загрузки (или создайте новую).', 'error');
+    return;
+  }
+  if (!file) {
+    setLoadLog('Ошибка: прикрепите файл (.pdf, .txt, .md, .rst).', 'error');
+    return;
+  }
+  const ext = fileExtension(file.name);
+  if (!ALLOWED_EXT.includes(ext)) {
+    setLoadLog(
+      'Ошибка: формат ' + (ext || '(без расширения)') + ' не поддерживается.\\n'
+      + 'Разрешены: ' + ALLOWED_EXT.join(', ') + '. ZIP загружайте после распаковки.',
+      'error'
+    );
+    return;
+  }
+  btn.disabled = true;
+  setLoadLog('Загрузка «' + file.name + '» в папку «' + collectionId + '»…', 'warn');
   const form = new FormData();
   form.append('file', file);
-  const res = await fetch(`/load?collection_id=${encodeURIComponent(collectionId)}&background=true`, { method: 'POST', body: form });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(`/load?collection_id=${encodeURIComponent(collectionId)}&background=true`, { method: 'POST', body: form });
+  } catch (err) {
+    setLoadLog('Сеть: не удалось связаться с gateway — ' + err, 'error');
+    btn.disabled = false;
+    return;
+  }
+  let data;
+  try { data = await res.json(); } catch (_) {
+    setLoadLog('Ошибка ответа сервера: ' + res.status + ' ' + res.statusText, 'error');
+    btn.disabled = false;
+    return;
+  }
   if (res.status === 202 && data.job_id) {
-    document.getElementById('loadLog').textContent = 'Индексация в фоне: ' + data.job_id;
+    setLoadLog('Индексация в фоне: ' + data.job_id + '…', 'warn');
     const poll = async () => {
-      const st = await fetch('/load/' + encodeURIComponent(data.job_id));
+      let st;
+      try {
+        st = await fetch('/load/' + encodeURIComponent(data.job_id));
+      } catch (err) {
+        setLoadLog('Ошибка опроса job: ' + err, 'error');
+        btn.disabled = false;
+        return;
+      }
       const body = await st.json();
-      document.getElementById('loadLog').textContent = JSON.stringify(body, null, 2);
-      if (body.status === 'pending' || body.status === 'running') setTimeout(poll, 1500);
+      if (body.status === 'completed') {
+        setLoadLog(
+          'Готово: «' + file.name + '» проиндексирован.\\n'
+          + JSON.stringify(body, null, 2) + '\\n\\nПроверьте вкладку «Источники».',
+          'ok'
+        );
+        btn.disabled = false;
+        fileInput.value = '';
+        await refreshCollections();
+        return;
+      }
+      if (body.status === 'failed') {
+        setLoadLog('Индексация не удалась:\\n' + JSON.stringify(body, null, 2), 'error');
+        btn.disabled = false;
+        return;
+      }
+      setLoadLog('Статус: ' + body.status + '…\\n' + JSON.stringify(body, null, 2), 'warn');
+      if (body.status === 'pending' || body.status === 'running') {
+        setTimeout(poll, 1500);
+      } else {
+        btn.disabled = false;
+      }
     };
     poll();
+  } else if (!res.ok) {
+    const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data, null, 2);
+    setLoadLog('Ошибка загрузки (' + res.status + '):\\n' + detail, 'error');
+    btn.disabled = false;
   } else {
-    document.getElementById('loadLog').textContent = JSON.stringify(data, null, 2);
+    setLoadLog('Загружено:\\n' + JSON.stringify(data, null, 2), 'ok');
+    btn.disabled = false;
+    fileInput.value = '';
+    await refreshCollections();
   }
-  await refreshCollections();
 };
 refreshCollections();
 </script>
@@ -266,7 +382,7 @@ async def chat_api(request: Request) -> Response:
                     "POST",
                     "/v1/query",
                     json=payload,
-                    timeout=120.0,
+                    timeout=GATEWAY_TIMEOUT,
                 ) as response:
                     if response.status_code >= 400:
                         body = await response.aread()

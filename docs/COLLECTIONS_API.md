@@ -20,7 +20,7 @@ python -m app serve
 Production (Gunicorn + Uvicorn workers):
 
 ```bash
-gunicorn api.gateway:app_gateway -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:3080 --workers 4 --timeout 120
+gunicorn api.gateway:app_gateway -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:3080 --workers 4 --timeout 300
 # Engine отдельно:
 python -m app serve-api --host 127.0.0.1 --port 8080
 ```

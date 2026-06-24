@@ -22,6 +22,23 @@ from router.smart_router import select_prompt
 log = logging.getLogger(__name__)
 
 
+def _llm_will_use_ollama() -> bool:
+    """Predict whether the active LLM chain will call Ollama for completions."""
+    if config.llm_provider == "ollama":
+        return True
+    if config.llm_provider == "openai":
+        return False
+    from core.llm.providers import _openai_key_configured
+
+    return not _openai_key_configured(config.openai_api_key)
+
+
+def _completion_max_tokens(num_predict: int, *, use_ollama: bool) -> int:
+    if use_ollama:
+        return min(num_predict, config.num_predict, config.openai_max_tokens, 600)
+    return min(num_predict, config.openai_max_tokens)
+
+
 class RagService:
     """Orchestrate retrieval, reranking, prompt routing, and completion."""
 
@@ -58,13 +75,20 @@ class RagService:
             }
 
         reranked = reranker.rerank(question, search_results)
+        system_prompt, num_predict, temperature = select_prompt(question)
+        use_ollama = _llm_will_use_ollama()
+        context_k = (
+            min(config.ollama_context_chunks, config.rerank_top_k)
+            if use_ollama
+            else config.rerank_top_k
+        )
+        chunk_limit = config.ollama_chunk_chars if use_ollama else 800
         context_parts: list[str] = []
         sources: list[tuple[Any, ...]] = []
-        for chunk, source, page, _distance in reranked[: config.rerank_top_k]:
-            context_parts.append("[%s, p.%s]\n%s" % (source, page, str(chunk)[:800]))
+        for chunk, source, page, _distance in reranked[:context_k]:
+            context_parts.append("[%s, p.%s]\n%s" % (source, page, str(chunk)[:chunk_limit]))
             sources.append((source, page))
         context = "\n\n".join(context_parts)
-        system_prompt, _num_predict, temperature = select_prompt(question)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "CONTEXT:\n%s\n\nQUESTION: %s" % (context, question)},
@@ -76,6 +100,7 @@ class RagService:
             "sources": sources,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": _completion_max_tokens(num_predict, use_ollama=use_ollama),
             "collection_ids": collection_ids or collection_service.get_selection(),
         }
 
@@ -110,7 +135,7 @@ class RagService:
         answer, provider_used = self._llm.complete(
             messages=built["messages"],
             temperature=built["temperature"],
-            max_tokens=config.openai_max_tokens,
+            max_tokens=built["max_tokens"],
         )
         payload: dict[str, Any] = {
             "question": question,
@@ -168,7 +193,7 @@ class RagService:
         for token, provider_used in self._llm.stream_complete(
             messages=built["messages"],
             temperature=built["temperature"],
-            max_tokens=config.openai_max_tokens,
+            max_tokens=built["max_tokens"],
         ):
             parts.append(token)
             yield {"event": "token", "data": {"text": token}}
