@@ -43,6 +43,25 @@ async def list_sources() -> dict[str, Any]:
     }
 
 
+@router.post("/sources/clear")
+async def clear_knowledge_base() -> dict[str, Any]:
+    """Delete all collections, files, and vector chunks (full knowledge-base wipe)."""
+    result = source_service.clear_knowledge_base()
+    result["message"] = (
+        f"База очищена: удалено {result.get('chunks_removed', 0)} чанков, "
+        f"{len(result.get('collections_removed', []))} папок"
+    )
+    return result
+
+
+@router.post("/sources/reset-index")
+async def reset_vector_index() -> dict[str, Any]:
+    """Wipe the vector index. Collection files on disk are preserved for re-ingestion."""
+    result = source_service.reset_index()
+    result["message"] = f"Индекс сброшен: удалено {result.get('chunks_removed', 0)} чанков"
+    return result
+
+
 @router.get("/sources/{source_id}/download")
 async def download_source(source_id: str) -> FileResponse:
     """Download the original uploaded file for a collection source."""

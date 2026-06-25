@@ -125,6 +125,14 @@ class CollectionService:
         self._save_registry(registry)
         log.info("collection deleted id=%s chunks_removed=%s", collection_id, removed)
 
+    def delete_all_collections(self) -> list[str]:
+        """Delete every collection with files and related vector chunks."""
+        registry = self._load_registry()
+        collection_ids = list(registry["collections"].keys())
+        for collection_id in collection_ids:
+            self.delete_collection(collection_id)
+        return collection_ids
+
     def list_documents(self, collection_id: str) -> list[CollectionDocument]:
         return self.get_collection(collection_id).documents
 

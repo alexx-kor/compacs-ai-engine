@@ -184,6 +184,7 @@ class RagService:
                 "collection_ids": built["collection_ids"],
                 "cached": False,
             }
+            yield {"event": "token", "data": {"text": payload["answer"]}}
             yield {"event": "done", "data": payload}
             return
 

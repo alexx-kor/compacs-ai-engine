@@ -36,6 +36,10 @@ _BASE_STYLE = """
   textarea, input, select { width: 100%; box-sizing: border-box; margin: 8px 0 16px; padding: 10px; }
   button { background: #1d4ed8; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
   button.danger { background: #dc2626; }
+  button.secondary { background: #64748b; }
+  .toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  ul.plain { list-style: none; padding: 0; margin: 0; }
+  ul.plain li { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
   pre { white-space: pre-wrap; background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 8px; }
   pre.error { background: #7f1d1d; color: #fecaca; }
   pre.ok { background: #14532d; color: #bbf7d0; }
@@ -160,6 +164,8 @@ async def chat_page() -> HTMLResponse:
 <label for="file">Файл</label>
 <input id="file" type="file" accept=".pdf,.txt,.md,.rst,application/pdf,text/plain,text/markdown">
 <button id="uploadBtn">Загрузить</button>
+<h3>Папки</h3>
+<ul id="collectionList" class="plain"></ul>
 <pre id="loadLog">1) Создайте папку → 2) выберите её выше → 3) прикрепите файл → 4) Загрузить. Статус и ошибки — здесь.</pre>
 </div>
 <script>
@@ -180,8 +186,10 @@ async function refreshCollections() {
   const sel = document.getElementById('selection');
   const upload = document.getElementById('uploadFolder');
   const prevUpload = upload.value;
+  const listEl = document.getElementById('collectionList');
   sel.innerHTML = '';
   upload.innerHTML = '';
+  listEl.innerHTML = '';
   const placeholder = document.createElement('option');
   placeholder.value = '';
   placeholder.textContent = (data.collections || []).length
@@ -197,6 +205,26 @@ async function refreshCollections() {
     opt.selected = selected.has(c.id);
     sel.appendChild(opt);
     upload.appendChild(opt.cloneNode(true));
+    const li = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = `${c.name} — id: ${c.id}, файлов: ${c.document_count}`;
+    const btn = document.createElement('button');
+    btn.className = 'danger';
+    btn.textContent = 'Удалить папку';
+    btn.onclick = async () => {
+      if (!confirm(`Удалить папку «${c.name}» со всеми файлами и чанками?`)) return;
+      const del = await fetch('/v1/collections/' + encodeURIComponent(c.id), { method: 'DELETE' });
+      setLoadLog(JSON.stringify(await del.json(), null, 2));
+      await refreshCollections();
+    };
+    li.appendChild(label);
+    li.appendChild(btn);
+    listEl.appendChild(li);
+  }
+  if (!listEl.children.length) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span class="muted">нет папок</span>';
+    listEl.appendChild(li);
   }
   if (prevUpload && (data.collections || []).some(c => c.id === prevUpload)) {
     upload.value = prevUpload;
@@ -234,11 +262,16 @@ document.getElementById('ask').onclick = async () => {
       }
       if (!data) continue;
       const parsed = JSON.parse(data);
-      if (event === 'status' && parsed.phase === 'retrieval') answerEl.textContent = 'Генерация ответа...';
+      if (event === 'status') {
+        if (parsed.phase === 'retrieval') answerEl.textContent = 'Поиск в индексе...';
+        if (parsed.phase === 'generation') answerEl.textContent = 'Генерация ответа (Ollama, может занять до 1–2 мин)...';
+        if (parsed.phase === 'cache') answerEl.textContent = 'Ответ из кэша...';
+      }
       if (event === 'token') { answer += parsed.text || ''; answerEl.textContent = answer; }
       if (event === 'done') {
         answer = parsed.answer || answer;
         sources = parsed.sources || [];
+        if (answer) answerEl.textContent = answer;
       }
     }
   }
@@ -458,14 +491,63 @@ async def sources_list(request: Request, format: str = Query(default="html")) ->
 <div class="card">
 <h1>Источники</h1>
 <p class="muted">GET /sources — JSON: <a href="/sources?format=json">/sources?format=json</a></p>
+<div class="toolbar">
+  <button class="danger" id="btnClearKb" onclick="clearKnowledgeBase()">Очистить базу знаний</button>
+  <button class="secondary" id="btnResetIndex" onclick="resetIndex()">Сбросить только индекс</button>
+</div>
+<p class="muted">«Очистить базу» — удаляет все папки, файлы в <code>data/collections/</code> и все чанки в индексе (включая legacy из <code>instructions/</code>). «Сбросить индекс» — только <code>chunks.json</code>; файлы папок остаются для повторной загрузки.</p>
 <table><thead><tr><th>Файл</th><th>Chunks</th><th>Папка</th><th></th><th></th></tr></thead><tbody>{rows or '<tr><td colspan=5>нет источников</td></tr>'}</tbody></table>
 </div>
 <script>
+async function postAdminAction(url, busyLabel) {{
+  const btnClear = document.getElementById('btnClearKb');
+  const btnReset = document.getElementById('btnResetIndex');
+  for (const btn of [btnClear, btnReset]) {{
+    if (btn) btn.disabled = true;
+  }}
+  const active = url.includes('clear') ? btnClear : btnReset;
+  const prev = active ? active.textContent : '';
+  if (active) active.textContent = busyLabel;
+  try {{
+    const res = await fetch(url, {{ method: 'POST' }});
+    let body = {{}};
+    try {{
+      body = await res.json();
+    }} catch (_) {{
+      body = {{ detail: await res.text() }};
+    }}
+    if (!res.ok) {{
+      alert('Ошибка: ' + (body.detail || res.statusText));
+      return;
+    }}
+    alert(body.message || 'Готово');
+    location.reload();
+  }} catch (error) {{
+    alert('Ошибка запроса: ' + error.message);
+  }} finally {{
+    for (const btn of [btnClear, btnReset]) {{
+      if (btn) {{
+        btn.disabled = false;
+        if (btn === btnClear) btn.textContent = 'Очистить базу знаний';
+        if (btn === btnReset) btn.textContent = 'Сбросить только индекс';
+      }}
+    }}
+    if (active && prev) active.textContent = prev;
+  }}
+}}
 async function deleteSource(id) {{
   if (!confirm('Удалить источник и переиндексировать?')) return;
   const res = await fetch('/sources/' + encodeURIComponent(id), {{ method: 'DELETE' }});
   alert(JSON.stringify(await res.json()));
   location.reload();
+}}
+async function clearKnowledgeBase() {{
+  if (!confirm('Удалить ВСЕ папки, файлы и чанки из базы знаний? Это необратимо.')) return;
+  await postAdminAction('/sources/clear', 'Очистка...');
+}}
+async function resetIndex() {{
+  if (!confirm('Сбросить векторный индекс? Файлы в data/collections/ останутся, но RAG перестанет находить документы до повторной индексации.')) return;
+  await postAdminAction('/sources/reset-index', 'Сброс...');
 }}
 </script>
 """
@@ -481,6 +563,20 @@ async def sources_download(source_id: str, request: Request) -> Response:
 @app_gateway.delete("/sources/{source_id}")
 async def sources_delete(source_id: str, request: Request) -> Response:
     response = await _engine_request(request, "DELETE", f"/sources/{source_id}")
+    return _proxy_response(response)
+
+
+@app_gateway.post("/sources/clear")
+async def sources_clear(request: Request) -> Response:
+    """Wipe all collections, files, and vector chunks."""
+    response = await _engine_request(request, "POST", "/sources/clear")
+    return _proxy_response(response)
+
+
+@app_gateway.post("/sources/reset-index")
+async def sources_reset_index(request: Request) -> Response:
+    """Wipe vector index only; collection files on disk are preserved."""
+    response = await _engine_request(request, "POST", "/sources/reset-index")
     return _proxy_response(response)
 
 

@@ -110,3 +110,59 @@ def test_list_and_delete_collection_source(source_env) -> None:
     result = sources.delete_source(listed[0].id)
     assert result["reindexed"] is True
     assert sources.list_sources() == []
+
+
+def test_clear_knowledge_base_removes_collections_and_legacy(source_env) -> None:
+    collections, sources, store, db = source_env
+    collections.create_collection("Manual", collection_id="manual")
+    text = (
+        "Кнопка «Новый документ» предназначена для формирования нового документа, "
+        "в котором отсутствуют CDPL-процедуры и связи."
+    )
+    with patch("core.collections.EmbeddingChain") as mock_chain:
+        mock_chain.return_value.embed.return_value = [[1.0, 0.0]]
+        collections.ingest_document("manual", "ui.txt", text.encode("utf-8"))
+
+    store.insert_batch(
+        [
+            ChunkRecord(
+                id="99",
+                source="instructions/legacy.txt",
+                page=1,
+                chunk="legacy chunk",
+                embedding=np.array([1.0, 0.0], dtype=np.float64),
+                dataset_kind="raw",
+            )
+        ]
+    )
+    assert len(sources.list_sources()) == 2
+
+    result = sources.clear_knowledge_base()
+    assert result["collections_removed"] == ["manual"]
+    assert "instructions/legacy.txt" in result["legacy_sources_removed"]
+    assert result["chunks_remaining"] == 0
+    assert result["chunks_removed"] >= 2
+    assert sources.list_sources() == []
+    assert collections.list_collections() == []
+
+
+def test_reset_index_preserves_collection_files(source_env) -> None:
+    collections, sources, store, db = source_env
+    collections.create_collection("Manual", collection_id="manual")
+    text = (
+        "Кнопка «Новый документ» предназначена для формирования нового документа, "
+        "в котором отсутствуют CDPL-процедуры и связи."
+    )
+    with patch("core.collections.EmbeddingChain") as mock_chain:
+        mock_chain.return_value.embed.return_value = [[1.0, 0.0]]
+        collections.ingest_document("manual", "ui.txt", text.encode("utf-8"))
+
+    path = sources.resolve_file_path("collections/manual/ui.txt")
+    assert path.is_file()
+
+    result = sources.reset_index()
+    assert result["chunks_removed"] == 1
+    assert result["chunks_remaining"] == 0
+    assert result["collection_files_preserved"] is True
+    assert path.is_file()
+    assert len(collections.list_collections()[0].documents) == 1

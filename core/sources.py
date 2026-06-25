@@ -129,5 +129,46 @@ class SourceService:
             raise SourceError(f"source not found: {source_id}")
         return {"deleted": source_id, "source": source, "reindexed": True, "chunks_removed": removed}
 
+    def clear_knowledge_base(self) -> dict[str, Any]:
+        """Remove all collections (files + registry) and every chunk in the vector index."""
+        chunks_before = db.get_chunk_count()
+        legacy_sources = [
+            source
+            for source in db.vector_store.list_sources()
+            if not source.startswith("collections/")
+        ]
+        collection_ids = [info.id for info in collection_service.list_collections()]
+
+        db.init_database(force_recreate=True)
+        for collection_id in collection_ids:
+            collection_service.delete_collection(collection_id)
+
+        self._clear_runtime_caches()
+        return {
+            "collections_removed": collection_ids,
+            "legacy_sources_removed": legacy_sources,
+            "chunks_removed": chunks_before,
+            "chunks_remaining": db.get_chunk_count(),
+        }
+
+    def reset_index(self) -> dict[str, Any]:
+        """Wipe the vector index only. Uploaded collection files stay on disk."""
+        chunks_removed = db.get_chunk_count()
+        db.init_database(force_recreate=True)
+        self._clear_runtime_caches()
+        return {
+            "chunks_removed": chunks_removed,
+            "chunks_remaining": db.get_chunk_count(),
+            "collection_files_preserved": True,
+        }
+
+    @staticmethod
+    def _clear_runtime_caches() -> None:
+        from core.embeddings.chain import EmbeddingChain
+
+        db._cache.clear()
+        db._cache_time.clear()
+        EmbeddingChain.embed_cached.cache_clear()
+
 
 source_service = SourceService()
